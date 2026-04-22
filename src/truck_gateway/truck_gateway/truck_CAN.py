@@ -30,7 +30,7 @@ class Truck_CAN_Node(Node):
 
         # Initialize tasks
         self.subscription = self.create_subscription(TruckCmd, 'truck_cmd', self.cmd_callback, 10)
-        self.create_timer(0.01, self.Control_Callback) #run at 100Hz
+        self.create_timer(0.02, self.Control_Callback) #run at 50Hz
 
         self.get_logger().info("Truck_CAN Node Started")
 
@@ -42,13 +42,14 @@ class Truck_CAN_Node(Node):
         #Save time of message
         self.last_msg_time = self.get_clock().now()
 
+
     def Control_Callback(self):
         #Check how old latest request is
         now = self.get_clock().now()
         age = now - self.last_msg_time
         age_seconds = age.nanoseconds / 1e9
 
-        #Set to zero if message was not recent
+        #Set to zero if latest message was not recent
         if age_seconds > 0.5:
             self.throttle = 0
             self.steering = 0
