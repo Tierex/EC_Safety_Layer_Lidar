@@ -19,30 +19,28 @@ class XboxTranslator(Node):
         cmd = TruckCmd()
 
         # ===== Throttle =====
-        rt = msg.axes[5]  # right trigger
-        lt = msg.axes[4]  # left trigger
+        rt_raw = msg.axes[5]  # right trigger
+        lt_raw = msg.axes[4]  # left trigger
 
-        rt_val = max(0, (rt + 1) / 2)
-        lt_val = max(0, (lt + 1) / 2)
+        rt_val = (1.0 - rt_raw) / 2.0
+        lt_val = (1.0 - lt_raw) / 2.0
 
         if rt_val > 0.05:
-            cmd.throttle = int(rt_val * 100)
+            cmd.throttle = rt_val * -100
         elif lt_val > 0.05:
-            cmd.throttle = int(-lt_val * 100)
+            cmd.throttle = lt_val * 100
 
 
         # ===== STEERING =====
-        if msg.axes[0] < -0.2:
-            cmd.steering = int(msg.axes[0] * 4500)
-        elif msg.axes[0] > 0.2:
-            cmd.steering = int(msg.axes[0] * 4500)
+        if abs(msg.axes[0]) > 0.2:
+            cmd.steering = -msg.axes[0] * 4500
         else:
-            cmd.steering = 0
+            cmd.steering = 0.0
 
 
         # ==== Deadman switch ====
         if not msg.buttons[0]:  # A pressed
-            cmd.throttle = 0
+            cmd.throttle = 0.0
 
         # ===== Send message =====
         self.pub.publish(cmd)

@@ -10,7 +10,7 @@ def generate_launch_description():
         parameters=[{
             'device_id': 0, #ros2 run joy joy_enumerate_devices
             'deadzone': 0.1,
-            'autorepeat_rate': 0.0,
+            'autorepeat_rate': 20.0,
             ' coalesce_interval_ms' : 2
         }]
     )
