@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<robot name="truck">
+  <!-- This is the truck body -->
+  <link name="base_link">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 1.5708"/> <!-- Adjust RPY if truck is sideways -->
+      <geometry>
+        <!-- Path to your STL -->
+        <mesh filename="package://lidar_safety_layer/config/Truck_Model.stl" scale="2.5 2.5 2.5"/>
+      </geometry>
+      <material name="gray">
+        <color rgba="0.5 0.5 0.5 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <!-- This link matches your LiDAR frame -->
+  <link name="velodyne"/>
+
+  <!-- Position the LiDAR on the truck (Adjust XYZ) -->
+  <joint name="truck_to_lidar" type="fixed">
+    <parent link="base_link"/>
+    <child link="velodyne"/>
+    <!-- Change Z to the height of your truck (e.g., 2.5 meters) -->
+    <!-- Change X if the lidar is at the front or back -->
+    <origin xyz="1.0 0.0 1.5" rpy="0 0 0"/> 
+  </joint>
+</robot>
