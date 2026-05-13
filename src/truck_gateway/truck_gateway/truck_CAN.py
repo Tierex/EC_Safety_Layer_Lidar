@@ -1,5 +1,6 @@
 import rclpy
 from rclpy.node import Node
+
 from truck_interfaces.msg import TruckCmd
 
 import can
@@ -11,14 +12,9 @@ class Truck_CAN_Node(Node):
         
         # Initialize CAN connection
         try:
-            # self.bus = can.interface.Bus(
-            #     bustype="pcan",
-            #     channel="PCAN_USBBUS1",
-            #     bitrate=500000
-            # )
-
             self.bus = can.interface.Bus(bustype="socketcan", channel="can1", bitrate=500000)
             self.get_logger().info("CAN Bus initialized successfully on PCAN_USBBUS1")
+
         except Exception as e:
             self.get_logger().error(f"Failed to initialize CAN Bus: {str(e)}")
             raise e

@@ -9,7 +9,7 @@ class XboxTranslator(Node):
     def __init__(self):
         super().__init__('xbox_translator')
 
-        self.pub = self.create_publisher(TruckCmd, 'truck_cmd', 10)
+        self.pub = self.create_publisher(TruckCmd, 'joy_truck_cmd', 10)
         self.sub = self.create_subscription(Joy, 'joy', self.joy_callback, 10)
         
         self.get_logger().info("Xbox Translator Node Started")
