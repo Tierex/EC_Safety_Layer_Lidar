@@ -66,9 +66,3 @@ ros2 launch truck_gateway truck_gateway_launch.py
 - **Controller Latency:** If the joystick response is sluggish, check the Bluetooth signal strength or consider using a wired USB connection.
 - **Permission Denied:** Ensure you have the necessary permissions to access the CAN interface. You may need to add your user to the `dialout` group.
 ```
-
-### Key Improvements made:
-1.  **Clear Hierarchy:** Used H1, H2, and H3 headers for better navigation.
-2.  **Standardized Syntax:** Formatted code blocks for better readability.
-3.  **Instructional Clarity:** Explained *why* the user is running specific commands (e.g., explaining the `can0` to `can1` rename logic).
-4.  **Troubleshooting Section:** Added a section for the most common errors you encountered today.
