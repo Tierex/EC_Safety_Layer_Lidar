@@ -8,7 +8,7 @@ class TruckCmdMux(Node):
     def __init__(self):
         super().__init__('truck_cmd_mux')
 
-        self.joy_sub = self.create_subscription(TruckCmd, 'joy_truck_cmd', self.joy_callback, 10)
+        self.joy_sub = self.create_subscription(TruckCmd, 'truck_cmd', self.joy_callback, 10)
         self.safety_sub = self.create_subscription(Int16, 'safety_signal', self.safety_callback, 10)
         
         self.pub = self.create_publisher(TruckCmd, 'truck_cmd', 10)

@@ -9,10 +9,12 @@ import can
 class Truck_CAN_Node(Node):
     def __init__(self):
         super().__init__('truck_control_node')
-        
+        channel = self.declare_parameter("can_channel", "vcan0").value
+
+
         # Initialize CAN connection
         try:
-            self.bus = can.interface.Bus(bustype="socketcan", channel="can1", bitrate=500000)
+            self.bus = can.interface.Bus(bustype="socketcan", channel=channel, bitrate=500000)
             self.get_logger().info("CAN Bus initialized successfully on PCAN_USBBUS1")
 
         except Exception as e:

@@ -5,3 +5,4 @@ bags/
 .vscode/
 __pycache__/
 *.pyc
+*.code-workspace

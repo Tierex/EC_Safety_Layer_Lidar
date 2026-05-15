@@ -19,7 +19,15 @@ def generate_launch_description():
     translator_node = Node(
         package='truck_gateway',
         executable='xbox_translator_exe',
-        name='xbox_translator'
+        name='xbox_translator',
+        remappings=[('truck_cmd', 'joy_truck_cmd')]
+    )
+
+    # Truck Cmd Mux
+    mux_node = Node(
+        package='truck_gateway',
+        executable='truck_cmd_mux_exe',
+        name='truck_cmd_mux'
     )
 
     # CAN Gateway
@@ -32,5 +40,6 @@ def generate_launch_description():
     return LaunchDescription([
         joy_node,
         translator_node,
+        mux_node,
         gateway_node
     ])
