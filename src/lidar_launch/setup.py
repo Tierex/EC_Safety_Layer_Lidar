@@ -27,7 +27,8 @@ setup(
         ],
     },
     entry_points={
-        'console_scripts': [
+        'console_scripts': [ 
+            'safety_overlay_node = lidar_launch.safety_overlay_node:main'
         ],
     },
 )

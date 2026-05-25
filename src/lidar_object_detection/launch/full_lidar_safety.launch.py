@@ -31,7 +31,7 @@ def generate_launch_description():
         ),
 
         Node(
-            package='lidar_pipeline',
+            package='lidar_object_detection',
             executable='lidar_detector',
             name='lidar_detector',
             output='screen',
@@ -44,7 +44,7 @@ def generate_launch_description():
         ),
 
         Node(
-            package='lidar_pipeline',
+            package='lidar_object_detection',
             executable='object_tracker',
             name='object_tracker',
             output='screen',
@@ -56,7 +56,7 @@ def generate_launch_description():
         ),
 
         Node(
-            package='lidar_pipeline',
+            package='lidar_object_detection',
             executable='ego_speed_constant_node',
             name='ego_speed_constant_node',
             output='screen',
@@ -69,7 +69,7 @@ def generate_launch_description():
         ),
 
         Node(
-            package='lidar_pipeline',
+            package='lidar_object_detection',
             executable='ego_speed_from_odom_node',
             name='ego_speed_from_odom_node',
             output='screen',
@@ -84,7 +84,7 @@ def generate_launch_description():
         ),
 
         Node(
-            package='lidar_pipeline',
+            package='lidar_object_detection',
             executable='ego_yaw_from_imu_node',
             name='ego_yaw_from_imu_node',
             output='screen',
@@ -98,7 +98,7 @@ def generate_launch_description():
         ),
 
         Node(
-            package='lidar_pipeline',
+            package='lidar_object_detection',
             executable='safety_supervisor',
             name='safety_supervisor',
             output='screen',
@@ -121,7 +121,7 @@ def generate_launch_description():
         ),
 
         Node(
-            package='lidar_pipeline',
+            package='lidar_object_detection',
             executable='control_node',
             name='control_node',
             output='screen',
@@ -136,7 +136,7 @@ def generate_launch_description():
         ),
 
         Node(
-            package='lidar_pipeline',
+            package='lidar_object_detection',
             executable='safety_monitor_node',
             name='safety_monitor_node',
             output='screen',
@@ -149,7 +149,7 @@ def generate_launch_description():
         ),
 
         Node(
-            package='lidar_pipeline',
+            package='lidar_object_detection',
             executable='lidar_subscriber',
             name='lidar_subscriber',
             output='screen',

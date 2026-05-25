@@ -6,9 +6,11 @@ from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
 def generate_launch_description():
-    pkg_share = get_package_share_directory('lidar_launch')
+    #Get package directorys
+    pkg_dir = get_package_share_directory('lidar_launch')
 
-    #Velodyne
+
+  #Velodyne
     velodyne_launch_dir = os.path.join(get_package_share_directory('velodyne'), 'launch')
     
     velodyne_launch = IncludeLaunchDescription(
@@ -17,12 +19,20 @@ def generate_launch_description():
         )
     )
 
-    #URDF (truck model)
-    urdf_file = os.path.join(pkg_share, 'config', 'truck.urdf')
+  #Object detection
+    obj_det_pkg_dir = get_package_share_directory('lidar_object_detection')
+    object_detection_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(obj_det_pkg_dir, 'launch', 'minimal_lidar_safety.launch.py')
+        )
+    )
+
+  #RVIZ2
+   #Truck model
+    urdf_file = os.path.join(pkg_dir, 'config', 'truck.urdf')
     with open(urdf_file, 'r') as infp:
         truck_desc = infp.read()
 
-    # 3. truck model publisher (Robot State Publisher Node)
     truck_description_publisher = Node(
         package='robot_state_publisher',
         executable='robot_state_publisher',
@@ -30,11 +40,15 @@ def generate_launch_description():
         parameters=[{'robot_description': truck_desc}],
     )
 
+   #Safety overlay node
+    safety_overlay_node = Node(
+        package='lidar_launch',
+        executable='safety_overlay_node',
+        name='safety_overlay_node'
+    )
 
-    #RVIZ
-    rviz_config_dir = os.path.join(pkg_share,'config', 'velodyne_default_V2.rviz')
-
-    # start RviZ with the saved config
+   #Rviz node
+    rviz_config_dir = os.path.join(pkg_dir,'config', 'safety_layer_V1.rviz')
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
@@ -44,6 +58,8 @@ def generate_launch_description():
 
     return LaunchDescription([
         velodyne_launch,
+        object_detection_launch,
         truck_description_publisher,
+        safety_overlay_node,
         rviz_node
     ])

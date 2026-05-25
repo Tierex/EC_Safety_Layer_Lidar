@@ -6,7 +6,7 @@
       <origin xyz="0 0 0" rpy="0 0 1.5708"/> <!-- Adjust RPY if truck is sideways -->
       <geometry>
         <!-- Path to your STL -->
-        <mesh filename="package://lidar_safety_layer/config/Truck_Model.stl" scale="2.5 2.5 2.5"/>
+        <mesh filename="package://lidar_launch/config/Truck_Model.stl" scale="2.5 2.5 2.5"/>
       </geometry>
       <material name="gray">
         <color rgba="0.5 0.5 0.5 1.0"/>

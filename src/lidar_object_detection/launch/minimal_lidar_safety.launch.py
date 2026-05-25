@@ -6,7 +6,7 @@ def generate_launch_description():
     return LaunchDescription([
 
         Node(
-            package='lidar_pipeline',
+            package='lidar_object_detection',
             executable='lidar_detector',
             name='lidar_detector',
             output='screen',
@@ -19,7 +19,7 @@ def generate_launch_description():
         ),
 
         Node(
-            package='lidar_pipeline',
+            package='lidar_object_detection',
             executable='object_tracker',
             name='object_tracker',
             output='screen',
@@ -31,7 +31,7 @@ def generate_launch_description():
         ),
 
         Node(
-            package='lidar_pipeline',
+            package='lidar_object_detection',
             executable='ego_speed_constant_node',
             name='ego_speed_constant_node',
             output='screen',
@@ -43,7 +43,7 @@ def generate_launch_description():
         ),
 
         Node(
-            package='lidar_pipeline',
+            package='lidar_object_detection',
             executable='safety_supervisor',
             name='safety_supervisor',
             output='screen',
