@@ -2,7 +2,7 @@ import os
 from glob import glob
 from setuptools import find_packages, setup
 
-package_name = 'lidar_safety_layer'
+package_name = 'lidar_launch'
 
 setup(
     name=package_name,
