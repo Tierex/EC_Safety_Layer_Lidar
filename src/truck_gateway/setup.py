@@ -6,7 +6,7 @@ package_name = 'truck_gateway'
 
 setup(
     name=package_name,
-    version='0.0.0',
+    version='1.0',
     packages=find_packages(exclude=['test']),
     data_files=[
         ('share/ament_index/resource_index/packages',
@@ -30,7 +30,8 @@ setup(
     entry_points={
         'console_scripts': [
             'truck_can_exe = truck_gateway.truck_CAN:main',
-            'xbox_translator_exe = truck_gateway.xbox_translator:main'
+            'xbox_translator_exe = truck_gateway.xbox_translator:main',
+            'truck_cmd_mux_exe = truck_gateway.truck_cmd_mux:main'
         ],
     },
 )

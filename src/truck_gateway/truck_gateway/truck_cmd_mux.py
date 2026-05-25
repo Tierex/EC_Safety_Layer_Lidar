@@ -8,7 +8,7 @@ class TruckCmdMux(Node):
     def __init__(self):
         super().__init__('truck_cmd_mux')
 
-        self.joy_sub = self.create_subscription(TruckCmd, 'truck_cmd', self.joy_callback, 10)
+        self.joy_sub = self.create_subscription(TruckCmd, 'joy_truck_cmd', self.joy_callback, 10)
         self.safety_sub = self.create_subscription(Int16, 'safety_signal', self.safety_callback, 10)
         
         self.pub = self.create_publisher(TruckCmd, 'truck_cmd', 10)
@@ -32,18 +32,18 @@ class TruckCmdMux(Node):
         out_msg = self.latest_joy_cmd
 
         #Safety check
-        match self.safety_state:
-            case 0:
+        if self.safety_state == 0:
                 out_msg.throttle = 0.0
                 self.get_logger().warn("Stop engaged - 0% throttle", throttle_duration_sec=0.2)
 
-            case 1:
+        elif self.safety_state == 1:
                 out_msg.throttle = out_msg.throttle * 0.5
                 self.get_logger().warn("Stop engaged - 50% throttle", throttle_duration_sec=0.2)
                 
-            case 2:
+        elif self.safety_state == 2:
                 out_msg.throttle = out_msg.throttle
 
+        #publish the muxed command
         self.pub.publish(out_msg)
 
 def main(args=None):

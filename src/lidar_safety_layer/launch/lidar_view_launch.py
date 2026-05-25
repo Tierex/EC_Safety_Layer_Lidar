@@ -32,7 +32,7 @@ def generate_launch_description():
 
 
     #RVIZ
-    rviz_config_dir = os.path.join(pkg_share,'config', 'velodyne_default.rviz')
+    rviz_config_dir = os.path.join(pkg_share,'config', 'velodyne_default_V2.rviz')
 
     # start RviZ with the saved config
     rviz_node = Node(

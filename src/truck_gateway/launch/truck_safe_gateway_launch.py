@@ -34,7 +34,8 @@ def generate_launch_description():
     gateway_node = Node(
         package='truck_gateway',
         executable='truck_can_exe',
-        name='truck_can_gateway'
+        name='truck_can_gateway',
+        parameters=[{"can_channel": "can0"}]
     )
 
     return LaunchDescription([

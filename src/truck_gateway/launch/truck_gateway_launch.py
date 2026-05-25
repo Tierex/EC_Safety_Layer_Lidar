@@ -27,7 +27,7 @@ def generate_launch_description():
         package='truck_gateway',
         executable='truck_can_exe',
         name='truck_can_gateway',
-        parameters=[{"can_channel": "vcan0"}]
+        parameters=[{"can_channel": "can0"}]
     )
 
     return LaunchDescription([

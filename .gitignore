@@ -6,3 +6,5 @@ bags/
 __pycache__/
 *.pyc
 *.code-workspace
+lidar_cluster_ros2/
+patchwork-plusplus-ros/
