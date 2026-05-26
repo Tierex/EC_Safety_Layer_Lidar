@@ -1,7 +1,7 @@
 import os
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription
+from launch.actions import IncludeLaunchDescription, LogInfo
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
@@ -11,20 +11,29 @@ def generate_launch_description():
 
 
   #Velodyne
-    velodyne_launch_dir = os.path.join(get_package_share_directory('velodyne'), 'launch')
-    
-    velodyne_launch = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(
-            os.path.join(velodyne_launch_dir, 'velodyne-all-nodes-VLP16-launch.py')
+    velodyne_action = None
+    try:
+        velodyne_launch_dir = os.path.join(get_package_share_directory('velodyne'), 'launch')
+        velodyne_action = IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(velodyne_launch_dir, 'velodyne-all-nodes-VLP16-launch.py')
+            )
         )
-    )
+    except PackageNotFoundError:
+        velodyne_action = LogInfo(msg='velodyne package not found; skipping velodyne launch.')
 
-  #Object detection
+    #Object detection
     obj_det_pkg_dir = get_package_share_directory('lidar_object_detection')
+    config_file = os.path.join(
+        obj_det_pkg_dir,
+        'config',
+        'lidar_pipeline_tuning.yaml'
+    )
     object_detection_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(obj_det_pkg_dir, 'launch', 'minimal_lidar_safety.launch.py')
-        )
+        ),
+        launch_arguments={'config_file': config_file}.items()
     )
 
   #RVIZ2
@@ -57,7 +66,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        velodyne_launch,
+        velodyne_action,
         object_detection_launch,
         truck_description_publisher,
         safety_overlay_node,

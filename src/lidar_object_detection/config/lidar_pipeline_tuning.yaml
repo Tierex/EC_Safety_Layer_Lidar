@@ -1,0 +1,303 @@
+# =========================================================
+# LIDAR PIPELINE TUNING PARAMETERS (ROS2)
+# =========================================================
+# File:
+#   lidar_pipeline_tuning.yaml
+#
+# Purpose:
+#   Central configuration file for all tunable parameters in the
+#   LiDAR safety pipeline.
+#
+# Important:
+#   Do NOT run ego_speed_constant_node and ego_speed_from_odom_node
+#   at the same time. Both publish to /ego_speed.
+#
+# Sensor mounting:
+#   LiDAR is mounted 0.5 m behind the front bumper and 1.8 m high.
+#
+# Coordinate convention:
+#   vehicle x = 0 at the front bumper
+#   sensor behind bumper => sensor_offset_x is negative
+# =========================================================
+
+
+lidar_detector:
+  ros__parameters:
+
+    # ------------------------
+    # Topics
+    # ------------------------
+    input_topic: /velodyne_points
+    output_topic: /detected_objects
+    marker_topic: /detected_object_markers
+
+    # ------------------------
+    # QoS / processing
+    # ------------------------
+    qos_depth: 10
+    reliable_qos: false
+    process_every_n_frames: 1
+
+    # ------------------------
+    # Region of interest (LiDAR frame)
+    # ------------------------
+    roi_x_min: 0.0
+    roi_x_max: 10.0
+    roi_y_min: -10.0
+    roi_y_max: 10.0
+    roi_z_min: -3.0
+    roi_z_max: 3.0
+
+    # ------------------------
+    # Downsampling
+    # ------------------------
+    voxel_size: 0.05
+
+    # ------------------------
+    # Ground removal
+    # ------------------------
+    use_ground_removal: true
+    ground_max_distance: 0.10
+    ground_max_angle_deg: 15.0
+    ground_max_iterations: 50
+
+    # ------------------------
+    # Clustering
+    # ------------------------
+    cluster_tolerance: 0.25
+    min_cluster_size: 8
+    max_cluster_size: 2000
+
+    # ------------------------
+    # Object size filter
+    # ------------------------
+    min_x_size: 0.15
+    min_y_size: 0.15
+    min_z_size: 0.70
+
+    max_x_size: 1.20
+    max_y_size: 1.20
+    max_z_size: 2.30
+
+    # ------------------------
+    # Debug / markers
+    # ------------------------
+    debug: false
+    debug_every_n_frames: 10
+    debug_objects: true
+
+    publish_markers: true
+    marker_lifetime: 0.25
+
+
+object_tracker:
+  ros__parameters:
+
+    # ------------------------
+    # Topics
+    # ------------------------
+    input_topic: /detected_objects
+    output_topic: /tracked_objects
+    marker_topic: /tracked_object_markers
+    frame_id: velodyne
+
+    # ------------------------
+    # QoS
+    # ------------------------
+    qos_depth: 20
+
+    # ------------------------
+    # Association / matching
+    # ------------------------
+    max_match_distance: 1.0
+    max_z_match_distance: 1.0
+    max_size_change_ratio: 2.5
+
+    # ------------------------
+    # Track lifecycle
+    # ------------------------
+    max_missed_frames: 5
+    min_hits_to_publish: 1
+
+    # ------------------------
+    # Velocity estimation
+    # ------------------------
+    velocity_alpha: 0.35
+    max_velocity: 15.0
+    predict_missed_tracks: true
+    max_dt: 0.5
+    min_dt: 0.001
+
+    # ------------------------
+    # Debug / markers
+    # ------------------------
+    publish_markers: true
+    marker_lifetime: 0.25
+
+    debug: false
+    debug_every_n_frames: 30
+
+
+safety_supervisor:
+  ros__parameters:
+
+    # ------------------------
+    # Topics
+    # ------------------------
+    input_topic: /tracked_objects
+    output_topic: /safety_signal
+    ego_speed_topic: /ego_speed
+
+    # ------------------------
+    # QoS / publish rate
+    # ------------------------
+    qos_depth: 20
+    publish_rate_hz: 20.0
+
+    # ------------------------
+    # Fail-safe behavior
+    # ------------------------
+    stale_timeout_sec: 0.5
+    stale_signal: 0
+    ego_speed_stale_timeout_sec: 1.0
+
+    # ------------------------
+    # Sensor offset model
+    # ------------------------
+    sensor_offset_x: -0.5
+    sensor_offset_y: 0.0
+    sensor_offset_z: 1.8
+
+    # ------------------------
+    # Corridor / region of interest
+    # ------------------------
+    corridor_half_width: 1.0
+    min_x_consider: 0.0
+    max_x_consider: 20.0
+
+    # ------------------------
+    # Distance thresholds
+    # ------------------------
+    emergency_distance: 1.5
+    hazard_distance: 2.5
+
+    # ------------------------
+    # TTC settings
+    # ------------------------
+    enable_ttc: true
+    emergency_ttc: 0.6
+    hazard_ttc: 1.5
+    min_closing_speed: 0.10
+
+    # ------------------------
+    # Track quality filter
+    # ------------------------
+    min_track_hits: 1
+    max_track_misses: 2
+
+    # ------------------------
+    # Cut-in prediction
+    # ------------------------
+    enable_cut_in_prediction: true
+    hazard_prediction_horizon: 1.5
+    emergency_prediction_horizon: 0.5
+    min_lateral_speed: 0.10
+
+    # ------------------------
+    # Hold times / hysteresis
+    # ------------------------
+    emergency_hold_sec: 0.30
+    hazard_hold_sec: 0.50
+
+    # ------------------------
+    # Physics-based braking model
+    # ------------------------
+    enable_brake_model: true
+    ego_speed_mps: 1.3889
+    max_decel_mps2: 1.5
+    system_delay_sec: 0.30
+    emergency_margin_m: 0.10
+    hazard_margin_m: 0.25
+
+    # ------------------------
+    # Debug
+    # ------------------------
+    debug: true
+    debug_every_n_frames: 1
+    debug_timer: true
+
+
+ego_speed_constant_node:
+  ros__parameters:
+
+    # Use this when /odom is not available.
+    ego_speed_topic: /ego_speed
+    speed_mps: 1.3889
+    publish_rate_hz: 50.0
+
+
+ego_speed_from_odom_node:
+  ros__parameters:
+
+    # Use this when /odom is available.
+    odom_topic: /odom
+    ego_speed_topic: /ego_speed
+    use_speed_magnitude: false
+    smoothing_alpha: 0.35
+    max_speed_mps: 5.0
+
+
+ego_yaw_from_imu_node:
+  ros__parameters:
+
+    # Optional. Use only when /imu/data exists.
+    imu_topic: /imu/data
+    ego_yaw_rate_topic: /ego_yaw_rate
+    smoothing_alpha: 0.35
+    max_yaw_rate_rps: 10.0
+
+
+control_node:
+  ros__parameters:
+
+    # ------------------------
+    # Topics
+    # ------------------------
+    input_topic: /safety_signal
+    output_topic: /cmd_vel
+
+    # ------------------------
+    # Speed commands
+    # ------------------------
+    speed_free_mps: 1.3889
+    speed_hazard_mps: 0.50
+    speed_emergency_mps: 0.0
+
+    # ------------------------
+    # Command smoothing
+    # ------------------------
+    max_accel_step_mps: 0.20
+
+
+safety_monitor_node:
+  ros__parameters:
+
+    # ------------------------
+    # Topics
+    # ------------------------
+    tracked_objects_topic: /tracked_objects
+    safety_signal_topic: /safety_signal
+    ego_speed_topic: /ego_speed
+
+    # ------------------------
+    # Console output rate
+    # ------------------------
+    print_rate_hz: 2.0
+
+
+lidar_subscriber:
+  ros__parameters:
+
+    # Optional debug node.
+    # Only add real parameters here if lidar_subscriber.cpp supports them.
+    dummy_parameter: 0
