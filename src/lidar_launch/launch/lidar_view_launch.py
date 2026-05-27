@@ -46,7 +46,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        velodyne_launch,
+        velodyne_action,
         truck_description_publisher,
         rviz_node
     ])

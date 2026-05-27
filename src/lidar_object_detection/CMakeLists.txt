@@ -58,6 +58,7 @@ add_executable(safety_supervisor src/safety_supervisor.cpp)
 ament_target_dependencies(safety_supervisor
   rclcpp
   std_msgs
+  visualization_msgs
 )
 
 add_executable(ego_speed_constant_node src/ego_speed_constant_node.cpp)

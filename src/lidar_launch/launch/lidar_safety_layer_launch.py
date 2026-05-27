@@ -11,29 +11,23 @@ def generate_launch_description():
 
 
   #Velodyne
-    velodyne_action = None
+    velodyne_launch = None
     try:
         velodyne_launch_dir = os.path.join(get_package_share_directory('velodyne'), 'launch')
-        velodyne_action = IncludeLaunchDescription(
+        velodyne_launch = IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(velodyne_launch_dir, 'velodyne-all-nodes-VLP16-launch.py')
             )
         )
     except PackageNotFoundError:
-        velodyne_action = LogInfo(msg='velodyne package not found; skipping velodyne launch.')
+        velodyne_launch = LogInfo(msg='velodyne package not found; skipping velodyne launch.')
 
-    #Object detection
+  #Object detection
     obj_det_pkg_dir = get_package_share_directory('lidar_object_detection')
-    config_file = os.path.join(
-        obj_det_pkg_dir,
-        'config',
-        'lidar_pipeline_tuning.yaml'
-    )
     object_detection_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(obj_det_pkg_dir, 'launch', 'minimal_lidar_safety.launch.py')
-        ),
-        launch_arguments={'config_file': config_file}.items()
+        )
     )
 
   #RVIZ2
@@ -57,7 +51,7 @@ def generate_launch_description():
     )
 
    #Rviz node
-    rviz_config_dir = os.path.join(pkg_dir,'config', 'safety_layer_V1.rviz')
+    rviz_config_dir = os.path.join(pkg_dir,'config', 'safety_layer_V3.rviz')
     rviz_node = Node(
         package='rviz2',
         executable='rviz2',
@@ -66,7 +60,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        velodyne_action,
+        velodyne_launch,
         object_detection_launch,
         truck_description_publisher,
         safety_overlay_node,
