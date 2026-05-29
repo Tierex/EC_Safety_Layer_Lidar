@@ -3,28 +3,15 @@ safety_supervisor:
 
     # =========================================================
     # Topics
-    # =========================================================
-    input_topic: /tracked_objects
-    output_topic: /safety_signal
-    ego_speed_topic: /ego_speed
-
-    # =========================================================
-    # QoS / timing
-    # =========================================================
-    qos_depth: 20
-    publish_rate_hz: 20.0
-
-    # =========================================================
-    # Fail-safe gedrag
-    # =========================================================
-    stale_timeout_sec: 0.5
-    stale_signal: 0
+    # =================================================: 0    # =========================================================
     ego_speed_stale_timeout_sec: 1.0
 
     # =========================================================
     # Sensor offset (LiDAR → voertuig)
+    # x = LiDAR positie t.o.v. front bumper in voertuigframe
+    # z = midden LiDAR t.o.v. grond
     # =========================================================
-    sensor_offset_x: -0.5
+    sensor_offset_x: -0.57
     sensor_offset_y: 0.0
     sensor_offset_z: 1.8
 
@@ -35,27 +22,26 @@ safety_supervisor:
     min_x_consider: 0.0
     max_x_consider: 20.0
 
-    # Front zones:
-    # Emergency: 0 → 1.5 m
-    # Hazard:    1.5 → 2.5 m
+    # Emergency: 0 → 1.5 m vanaf voorkant truck
+    # Hazard:    1.5 → 2.5 m vanaf voorkant truck
     emergency_distance: 1.5
     hazard_distance: 2.5
+
+    # =========================================================
+    # VLP-16 zichtfrustum voor RViz
+    # VLP-16 vertical FOV = +15° / -15°
+    # =========================================================
+    lidar_down_angle_deg: 15.0
+    lidar_up_angle_deg: 15.0
 
     # =========================================================
     # SIDE ZONES (GEEN overlap, langs trailer)
     # =========================================================
     enable_side_zones: true
 
-    # Lengte langs trailer (achter!!)
     side_zone_length: 6.0
-
-    # Totale breedte van side zone
     side_zone_width: 0.6
-
-    # Afstand vanaf midden voertuig
     side_zone_offset_y: 1.2
-
-    # Alleen objecten die naar truck bewegen
     min_side_approach_speed: 0.10
 
     # =========================================================
@@ -95,7 +81,6 @@ safety_supervisor:
     emergency_ttc_hysteresis: 0.20
     hazard_ttc_hysteresis: 0.20
 
-    # Side zone extra marge
     side_zone_hysteresis_x: 0.20
     side_zone_hysteresis_y: 0.10
 
@@ -111,13 +96,18 @@ safety_supervisor:
     hazard_margin_m: 0.25
 
     # =========================================================
-    # RVIZ VISUALISATIE (BELANGRIJK)
+    # RVIZ VISUALISATIE
     # =========================================================
+    marker_topic: /safety_zones_array
     marker_frame_id: velodyne
 
-    # Hoogte van alle zones
-    # (onderkant = grond)
-    zone_height: 2.0
+    # Visuele hoogtecap voor frustum en side boxes.
+    # 3.0 laat de +15° bovenstraal beter zien dan 2.0.
+    zone_height: 3.0
+
+    lidar_down_angle_deg: 15.0
+    lidar_up_angle_deg: 15.0
+
 
     # =========================================================
     # Debug
@@ -125,3 +115,17 @@ safety_supervisor:
     debug: true
     debug_every_n_frames: 1
     debug_timer: true
+    input_topic: /tracked_objects
+    output_topic: /safety_signal
+    ego_speed_topic: /ego_speed
+
+    # =========================================================
+    # QoS / timing
+    # =========================================================
+    qos_depth: 20
+    publish_rate_hz: 20.0
+
+    # =========================================================
+    # Fail-safe gedrag
+    # =========================================================
+    stale_timeout_sec: 0.5

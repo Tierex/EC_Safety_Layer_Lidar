@@ -24,7 +24,7 @@ ip link show | grep can
 ```bash
 sudo ip link set can0 down
 sudo ip link set can0 name can1
-sudo ip link set can1 up type can bitrate 500000
+sudo ip link set can0 up type can bitrate 500000
 ```
 
 ---
