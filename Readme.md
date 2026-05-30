@@ -51,4 +51,10 @@ ros2 bag play -l bags/rosbag2_2026_05_21-14_54_18
 ros2 bag play -l bags/rosbag2_2026_05_21-14_55_51
 ros2 bag play -l bags/rosbag2_2026_05_21-15_02_25
 
+ros2 bag play -l bags/rosbag2_2026_05_28_Angles
+ros2 bag play -l bags/rosbag2_2026_05_28_Group_people
+ros2 bag play -l bags/rosbag2_2026_05_28_Safety_Zone_Check
+ros2 bag play -l bags/rosbag2_2026_05_28_Tim_Angle_R
+ros2 bag play -l bags/rosbag2_2026_05_21-Tim_Straight
+
 ```

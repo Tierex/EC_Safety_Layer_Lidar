@@ -9,25 +9,41 @@ This document provides the standard operating procedure for connecting to the tr
 ### Physical Setup
 1. Follow the standard vehicle startup procedure.
 2. Configure the truck into **CAN-mode** using the **HAN-Tune** utility.
+
+   2.1 Open the HANtune directory (this case build 102)
+   ```bash
+      cd HANtune_build_102
+   ```
+   2.2 Open HANtune from the terminal
+   ```bash
+      bash HANtune.sh
+   ```
+   2.3 Open file HAN_Tune_SCALED.hml in HANtune
+   2.4 Calibrate wheels
 3. Connect the **PCAN-USB** adapter to the device.
 
-### Network Configuration
-The software is configured to look for the interface named `can1`. If your adapter is detected as `can0`, follow these steps to rename and initialize it:
+### CAN network Configuration
 
-**Verify the current interface name:**
+
+**Verify that the PCAN-USB driver is available:**
 ```bash
 ip link show | grep can
 ```
 
-**Rename and bring the interface UP:**
-*If the output shows `can0`, run the following sequence:*
+**Bring the interface UP:**
+```bash
+sudo ip link set can1 up type can bitrate 500000
+```
+**Note change can... to relevant CAN interface*
+
+**(Change CAN interface name)**
+
+By default the launch file of the gateway listens to ```can0```.
+This parameter can be changed in the launch file, or the interface can be renamed;
 ```bash
 sudo ip link set can0 down
 sudo ip link set can0 name can1
-sudo ip link set can1 up type can bitrate 500000
 ```
-
----
 
 ## 2. Connect Xbox Controller
 
@@ -62,7 +78,6 @@ ros2 launch truck_gateway truck_gateway_launch.py
 ---
 
 ## Troubleshooting
-- **Device Not Found:** If you receive a `[Errno 19] No such device` error, ensure that `can1` is visible in `ip link show` and that the state is `UP`.
-- **Controller Latency:** If the joystick response is sluggish, check the Bluetooth signal strength or consider using a wired USB connection.
+- **Device Not Found:** If you receive a `[Errno 19] No such device` error, ensure that a `can` inteface is visible in `ip link show` and that the state is `UP`. Also ensure the launch file is configured to listen to this `can` interface.
 - **Permission Denied:** Ensure you have the necessary permissions to access the CAN interface. You may need to add your user to the `dialout` group.
-```
+
