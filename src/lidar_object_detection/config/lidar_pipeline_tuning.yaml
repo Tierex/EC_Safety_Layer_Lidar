@@ -23,43 +23,67 @@ safety_supervisor:
 
     # =========================================================
     # Sensor offset (LiDAR → voertuig)
+    #
+    # Vehicle frame:
+    # x = 0 bij voorkant truck
+    # x positief naar voren
+    # y positief naar links
+    # z positief omhoog vanaf grond
     # =========================================================
-    sensor_offset_x: -0.5
+    sensor_offset_x: -0.57
     sensor_offset_y: 0.0
     sensor_offset_z: 1.8
 
     # =========================================================
-    # FRONT SAFETY (GEEN overlap)
+    # FRONT / CAB DETECTIEZONES
+    #
+    # Nieuwe logica:
+    # Emergency = halve cirkel/sector 0.0 → 1.5 m
+    # Hazard    = halve ring/sector 1.5 → 2.5 m
+    #
+    # Hoek loopt van -90° tot +90° t.o.v. rijrichting
     # =========================================================
     corridor_half_width: 1.0
     min_x_consider: 0.0
     max_x_consider: 20.0
 
-    # Front zones:
-    # Emergency: 0 → 1.5 m
-    # Hazard:    1.5 → 2.5 m
     emergency_distance: 1.5
     hazard_distance: 2.5
 
+    # Aantal segmenten voor de halve cirkel in RViz.
+    # Hoger = vloeiender, lager = lichter.
+    sector_azimuth_steps: 120
+
     # =========================================================
-    # SIDE ZONES (GEEN overlap, langs trailer)
+    # VLP-16 zichtvolume
+    #
+    # VLP-16 vertical FOV:
+    # +15° omhoog
+    # -15° omlaag
+    # =========================================================
+    lidar_down_angle_deg: 15.0
+    lidar_up_angle_deg: 15.0
+
+    # =========================================================
+    # SIDE ZONES
+    #
+    # Deze zones zijn exact gelijk aan wat RViz tekent.
+    # Binnenste helft = emergency
+    # Buitenste helft = hazard
     # =========================================================
     enable_side_zones: true
 
-    # Lengte langs trailer (achter!!)
     side_zone_length: 6.0
-
-    # Totale breedte van side zone
     side_zone_width: 0.6
-
-    # Afstand vanaf midden voertuig
     side_zone_offset_y: 1.2
-
-    # Alleen objecten die naar truck bewegen
     min_side_approach_speed: 0.10
 
     # =========================================================
-    # TTC (Time-To-Collision)
+    # TTC
+    #
+    # Let op:
+    # In de huidige versie bepaalt de geometrische zone de output.
+    # Deze parameters blijven staan voor compatibiliteit.
     # =========================================================
     enable_ttc: true
     emergency_ttc: 0.6
@@ -74,6 +98,10 @@ safety_supervisor:
 
     # =========================================================
     # Cut-in prediction
+    #
+    # Let op:
+    # In de huidige versie bepaalt de geometrische zone de output.
+    # Deze parameters blijven staan voor compatibiliteit.
     # =========================================================
     enable_cut_in_prediction: true
     hazard_prediction_horizon: 1.5
@@ -81,13 +109,19 @@ safety_supervisor:
     min_lateral_speed: 0.10
 
     # =========================================================
-    # HOLD TIMES (stabiliteit)
+    # HOLD TIMES
+    #
+    # Deze worden nog gebruikt voor stabiele output.
     # =========================================================
     emergency_hold_sec: 0.30
     hazard_hold_sec: 0.50
 
     # =========================================================
-    # HYSTERESIS (tegen flippen)
+    # HYSTERESIS
+    #
+    # Let op:
+    # In de huidige geometrische versie worden deze niet gebruikt
+    # voor zonegrenzen, maar ze mogen blijven staan.
     # =========================================================
     emergency_distance_hysteresis: 0.30
     hazard_distance_hysteresis: 0.30
@@ -95,12 +129,15 @@ safety_supervisor:
     emergency_ttc_hysteresis: 0.20
     hazard_ttc_hysteresis: 0.20
 
-    # Side zone extra marge
     side_zone_hysteresis_x: 0.20
     side_zone_hysteresis_y: 0.10
 
     # =========================================================
     # Physics brake model
+    #
+    # Let op:
+    # In de huidige versie bepaalt de geometrische zone de output.
+    # Deze parameters blijven staan voor compatibiliteit.
     # =========================================================
     enable_brake_model: true
     ego_speed_mps: 1.3889
@@ -111,13 +148,14 @@ safety_supervisor:
     hazard_margin_m: 0.25
 
     # =========================================================
-    # RVIZ VISUALISATIE (BELANGRIJK)
+    # RVIZ VISUALISATIE
     # =========================================================
+    marker_topic: /safety_zones_array
     marker_frame_id: velodyne
 
-    # Hoogte van alle zones
-    # (onderkant = grond)
-    zone_height: 2.0
+    # Visuele hoogtecap.
+    # 3.0 m geeft genoeg ruimte om +15° omhoog te tonen.
+    zone_height: 3.0
 
     # =========================================================
     # Debug

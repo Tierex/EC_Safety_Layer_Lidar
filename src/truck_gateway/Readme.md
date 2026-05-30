@@ -43,6 +43,10 @@ This parameter can be changed in the launch file, or the interface can be rename
 ```bash
 sudo ip link set can0 down
 sudo ip link set can0 name can1
+<<<<<<< HEAD
+=======
+sudo ip link set can0 up type can bitrate 500000
+>>>>>>> ad8707203eab5494828eb7775b435d385ab0a344
 ```
 
 ## 2. Connect Xbox Controller
