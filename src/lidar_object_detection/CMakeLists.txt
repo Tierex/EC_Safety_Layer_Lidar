@@ -114,7 +114,7 @@ install(TARGETS
 )
 
 # ========================
-# INSTALL LAUNCH FILES
+# INSTALL LAUNCH AND CONFIG
 # ========================
 
 install(DIRECTORY

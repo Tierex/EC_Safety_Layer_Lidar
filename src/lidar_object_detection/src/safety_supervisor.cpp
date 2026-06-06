@@ -1,20 +1,32 @@
+// ============================================================================
 // safety_supervisor.cpp
-// SafetySupervisor node where visualization geometry matches detection geometry.
+// ============================================================================
+// 3D VLP-16 matched safety supervisor.
 //
-// Detection zones:
+// Doel:
+// - RViz-zones zijn exact dezelfde geometrie als de detectiezones.
 // - Front/cab emergency:
-//     semicircle sector, angle -90..+90 deg, radius 0.0 -> emergency_distance
+//     sector -90°..+90°, radius 0.0 -> emergency_distance
 // - Front/cab hazard:
-//     semicircle ring, angle -90..+90 deg, radius emergency_distance -> hazard_distance
-// - Side zones:
-//     same rectangular VLP-16 frustum zones as shown in RViz
+//     sector -90°..+90°, radius emergency_distance -> hazard_distance
+// - Side/trailer:
+//     left/right side zones zijn ALLEEN hazard.
+// - Objecten triggeren alleen als hun hoogte-interval overlapt met het
+//   VLP-16 zichtvolume.
+// - Marker frame standaard: safety_base.
 //
-// RViz zones and detection zones are intentionally identical.
+// Frames:
+// - Tracks komen binnen in het LiDAR/rosbag-frame: sensor-origin is x=0.
+// - sensor_offset_x = -0.57 betekent: sensor staat 0.57 m achter de truckvoorkant.
+// - Truckvoorkant ligt dus in het rosbag/sensor-frame op x = +0.57.
+// - Front emergency/hazard is 180 graden vanuit de sensor-origin x=0.
+// - Side/trailer hazard-zones zijn rechthoeken langs truck/trailer vanaf x=0 naar achteren.
+// - RViz-zones en detectiezones gebruiken dezelfde geometrie.
+// ============================================================================
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <limits>
 #include <memory>
 #include <string>
 #include <utility>
@@ -97,7 +109,11 @@ public:
       marker_topic_,
       marker_qos);
 
+    status_marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>(
+      "/safety_status_marker", 1);
+
     const double period = 1.0 / std::max(1.0, publish_rate_hz_);
+
     timer_ = this->create_wall_timer(
       std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::duration<double>(period)),
@@ -116,9 +132,9 @@ public:
   }
 
 private:
-  // =========================================================
+  // ==========================================================================
   // PARAMETERS
-  // =========================================================
+  // ==========================================================================
   void declareParams()
   {
     this->declare_parameter<std::string>("input_topic", "/tracked_objects");
@@ -132,79 +148,37 @@ private:
     this->declare_parameter<int>("stale_signal", 0);
     this->declare_parameter<double>("ego_speed_stale_timeout_sec", 1.0);
 
-    // Vehicle frame:
-    // x = 0 at front bumper
-    // x positive forward
-    // y positive left
-    // z positive up from ground
+    // Rosbag/LiDAR-frame:
+    // sensor-origin is x=0.
+    // sensor_offset_x=-0.57 betekent: fysieke truckvoorkant ligt op x=+0.57.
     this->declare_parameter<double>("sensor_offset_x", -0.57);
     this->declare_parameter<double>("sensor_offset_y", 0.0);
     this->declare_parameter<double>("sensor_offset_z", 1.8);
 
-    // Kept for compatibility with older YAML/configs.
-    this->declare_parameter<double>("corridor_half_width", 1.0);
-    this->declare_parameter<double>("min_x_consider", 0.0);
-    this->declare_parameter<double>("max_x_consider", 20.0);
-
-    // Front/cab sector distances.
     this->declare_parameter<double>("emergency_distance", 1.5);
     this->declare_parameter<double>("hazard_distance", 2.5);
 
-    // Kept for compatibility.
-    this->declare_parameter<bool>("enable_ttc", true);
-    this->declare_parameter<double>("emergency_ttc", 0.6);
-    this->declare_parameter<double>("hazard_ttc", 1.5);
-    this->declare_parameter<double>("min_closing_speed", 0.10);
+    this->declare_parameter<bool>("enable_side_zones", true);
+    this->declare_parameter<double>("side_zone_length", 2.0);
+    this->declare_parameter<double>("side_zone_width", 0.8);
+    this->declare_parameter<double>("side_zone_offset_y", 0.8);
 
     this->declare_parameter<int>("min_track_hits", 1);
     this->declare_parameter<int>("max_track_misses", 2);
 
-    // Kept for compatibility.
-    this->declare_parameter<bool>("enable_cut_in_prediction", true);
-    this->declare_parameter<double>("hazard_prediction_horizon", 1.5);
-    this->declare_parameter<double>("emergency_prediction_horizon", 0.5);
-    this->declare_parameter<double>("min_lateral_speed", 0.10);
-
-    this->declare_parameter<double>("emergency_hold_sec", 0.30);
-    this->declare_parameter<double>("hazard_hold_sec", 0.50);
-
-    // Kept for compatibility.
-    this->declare_parameter<bool>("enable_brake_model", true);
-    this->declare_parameter<double>("ego_speed_mps", 1.3889);
-    this->declare_parameter<double>("max_decel_mps2", 1.5);
-    this->declare_parameter<double>("system_delay_sec", 0.30);
-    this->declare_parameter<double>("emergency_margin_m", 0.10);
-    this->declare_parameter<double>("hazard_margin_m", 0.25);
-
-    this->declare_parameter<bool>("enable_side_zones", true);
-    this->declare_parameter<double>("side_zone_length", 6.0);
-    this->declare_parameter<double>("side_zone_width", 0.6);
-    this->declare_parameter<double>("side_zone_offset_y", 1.2);
-    this->declare_parameter<double>("min_side_approach_speed", 0.10);
-
-    // Kept for compatibility.
-    this->declare_parameter<double>("emergency_distance_hysteresis", 0.30);
-    this->declare_parameter<double>("hazard_distance_hysteresis", 0.30);
-    this->declare_parameter<double>("emergency_ttc_hysteresis", 0.20);
-    this->declare_parameter<double>("hazard_ttc_hysteresis", 0.20);
-    this->declare_parameter<double>("side_zone_hysteresis_x", 0.20);
-    this->declare_parameter<double>("side_zone_hysteresis_y", 0.10);
+    this->declare_parameter<double>("emergency_hold_sec", 0.25);
+    this->declare_parameter<double>("hazard_hold_sec", 0.25);
 
     this->declare_parameter<std::string>("marker_topic", "/safety_zones_array");
-    this->declare_parameter<std::string>("marker_frame_id", "velodyne");
+    this->declare_parameter<std::string>("marker_frame_id", "safety_base");
 
-    // Visual cap in vehicle-frame height.
     this->declare_parameter<double>("zone_height", 3.0);
-
-    // VLP-16 vertical FOV model around horizontal sensor line.
     this->declare_parameter<double>("lidar_down_angle_deg", 15.0);
     this->declare_parameter<double>("lidar_up_angle_deg", 15.0);
-
     this->declare_parameter<int>("sector_azimuth_steps", 120);
 
     this->declare_parameter<bool>("debug", true);
     this->declare_parameter<int>("debug_every_n_frames", 1);
-    this->declare_parameter<bool>("debug_timer", true);
   }
 
   void loadParams()
@@ -218,118 +192,64 @@ private:
 
     stale_timeout_sec_ = this->get_parameter("stale_timeout_sec").as_double();
     stale_signal_ = this->get_parameter("stale_signal").as_int();
-    ego_speed_stale_timeout_sec_ = this->get_parameter("ego_speed_stale_timeout_sec").as_double();
+    ego_speed_stale_timeout_sec_ =
+      this->get_parameter("ego_speed_stale_timeout_sec").as_double();
 
     sensor_offset_x_ = this->get_parameter("sensor_offset_x").as_double();
     sensor_offset_y_ = this->get_parameter("sensor_offset_y").as_double();
     sensor_offset_z_ = this->get_parameter("sensor_offset_z").as_double();
 
-    corridor_half_width_ = this->get_parameter("corridor_half_width").as_double();
-    min_x_consider_ = this->get_parameter("min_x_consider").as_double();
-    max_x_consider_ = this->get_parameter("max_x_consider").as_double();
-
     emergency_distance_ = this->get_parameter("emergency_distance").as_double();
     hazard_distance_ = this->get_parameter("hazard_distance").as_double();
-
-    enable_ttc_ = this->get_parameter("enable_ttc").as_bool();
-    emergency_ttc_ = this->get_parameter("emergency_ttc").as_double();
-    hazard_ttc_ = this->get_parameter("hazard_ttc").as_double();
-    min_closing_speed_ = this->get_parameter("min_closing_speed").as_double();
-
-    min_track_hits_ = this->get_parameter("min_track_hits").as_int();
-    max_track_misses_ = this->get_parameter("max_track_misses").as_int();
-
-    enable_cut_in_prediction_ = this->get_parameter("enable_cut_in_prediction").as_bool();
-    hazard_prediction_horizon_ = this->get_parameter("hazard_prediction_horizon").as_double();
-    emergency_prediction_horizon_ = this->get_parameter("emergency_prediction_horizon").as_double();
-    min_lateral_speed_ = this->get_parameter("min_lateral_speed").as_double();
-
-    emergency_hold_sec_ = this->get_parameter("emergency_hold_sec").as_double();
-    hazard_hold_sec_ = this->get_parameter("hazard_hold_sec").as_double();
-
-    enable_brake_model_ = this->get_parameter("enable_brake_model").as_bool();
-    ego_speed_fallback_mps_ = this->get_parameter("ego_speed_mps").as_double();
-    max_decel_mps2_ = this->get_parameter("max_decel_mps2").as_double();
-    system_delay_sec_ = this->get_parameter("system_delay_sec").as_double();
-    emergency_margin_m_ = this->get_parameter("emergency_margin_m").as_double();
-    hazard_margin_m_ = this->get_parameter("hazard_margin_m").as_double();
 
     enable_side_zones_ = this->get_parameter("enable_side_zones").as_bool();
     side_zone_length_ = this->get_parameter("side_zone_length").as_double();
     side_zone_width_ = this->get_parameter("side_zone_width").as_double();
     side_zone_offset_y_ = this->get_parameter("side_zone_offset_y").as_double();
-    min_side_approach_speed_ = this->get_parameter("min_side_approach_speed").as_double();
 
-    emergency_distance_hysteresis_ = this->get_parameter("emergency_distance_hysteresis").as_double();
-    hazard_distance_hysteresis_ = this->get_parameter("hazard_distance_hysteresis").as_double();
-    emergency_ttc_hysteresis_ = this->get_parameter("emergency_ttc_hysteresis").as_double();
-    hazard_ttc_hysteresis_ = this->get_parameter("hazard_ttc_hysteresis").as_double();
-    side_zone_hysteresis_x_ = this->get_parameter("side_zone_hysteresis_x").as_double();
-    side_zone_hysteresis_y_ = this->get_parameter("side_zone_hysteresis_y").as_double();
+    min_track_hits_ = this->get_parameter("min_track_hits").as_int();
+    max_track_misses_ = this->get_parameter("max_track_misses").as_int();
+
+    emergency_hold_sec_ = this->get_parameter("emergency_hold_sec").as_double();
+    hazard_hold_sec_ = this->get_parameter("hazard_hold_sec").as_double();
 
     marker_topic_ = this->get_parameter("marker_topic").as_string();
     marker_frame_id_ = this->get_parameter("marker_frame_id").as_string();
 
     zone_height_ = this->get_parameter("zone_height").as_double();
-
     lidar_down_angle_deg_ = this->get_parameter("lidar_down_angle_deg").as_double();
     lidar_up_angle_deg_ = this->get_parameter("lidar_up_angle_deg").as_double();
-
     sector_azimuth_steps_ = this->get_parameter("sector_azimuth_steps").as_int();
 
     debug_ = this->get_parameter("debug").as_bool();
     debug_every_n_frames_ = this->get_parameter("debug_every_n_frames").as_int();
-    debug_timer_ = this->get_parameter("debug_timer").as_bool();
 
-    // Sanity clamps.
-    if (qos_depth_ < 1) qos_depth_ = 1;
-    if (publish_rate_hz_ <= 0.0) publish_rate_hz_ = 20.0;
+    if (qos_depth_ < 1) {
+      qos_depth_ = 1;
+    }
+
+    if (publish_rate_hz_ <= 0.0) {
+      publish_rate_hz_ = 20.0;
+    }
 
     stale_timeout_sec_ = std::max(0.0, stale_timeout_sec_);
     ego_speed_stale_timeout_sec_ = std::max(0.0, ego_speed_stale_timeout_sec_);
 
-    corridor_half_width_ = std::max(0.0, corridor_half_width_);
-
-    if (max_x_consider_ < min_x_consider_) {
-      max_x_consider_ = min_x_consider_;
-    }
+    emergency_distance_ = std::max(0.0, emergency_distance_);
 
     if (hazard_distance_ < emergency_distance_) {
       hazard_distance_ = emergency_distance_;
     }
 
-    min_closing_speed_ = std::max(0.0, min_closing_speed_);
-    min_track_hits_ = std::max(1, min_track_hits_);
-    max_track_misses_ = std::max(0, max_track_misses_);
-
-    hazard_prediction_horizon_ = std::max(0.0, hazard_prediction_horizon_);
-    emergency_prediction_horizon_ = std::max(0.0, emergency_prediction_horizon_);
-    min_lateral_speed_ = std::max(0.0, min_lateral_speed_);
-
-    emergency_hold_sec_ = std::max(0.0, emergency_hold_sec_);
-    hazard_hold_sec_ = std::max(0.0, hazard_hold_sec_);
-
-    ego_speed_fallback_mps_ = std::max(0.0, ego_speed_fallback_mps_);
-
-    if (max_decel_mps2_ <= 0.0) {
-      max_decel_mps2_ = 1.0;
-    }
-
-    system_delay_sec_ = std::max(0.0, system_delay_sec_);
-    emergency_margin_m_ = std::max(0.0, emergency_margin_m_);
-    hazard_margin_m_ = std::max(0.0, hazard_margin_m_);
-
     side_zone_length_ = std::max(0.0, side_zone_length_);
     side_zone_width_ = std::max(0.0, side_zone_width_);
     side_zone_offset_y_ = std::max(0.0, side_zone_offset_y_);
-    min_side_approach_speed_ = std::max(0.0, min_side_approach_speed_);
 
-    emergency_distance_hysteresis_ = std::max(0.0, emergency_distance_hysteresis_);
-    hazard_distance_hysteresis_ = std::max(0.0, hazard_distance_hysteresis_);
-    emergency_ttc_hysteresis_ = std::max(0.0, emergency_ttc_hysteresis_);
-    hazard_ttc_hysteresis_ = std::max(0.0, hazard_ttc_hysteresis_);
-    side_zone_hysteresis_x_ = std::max(0.0, side_zone_hysteresis_x_);
-    side_zone_hysteresis_y_ = std::max(0.0, side_zone_hysteresis_y_);
+    min_track_hits_ = std::max(1, min_track_hits_);
+    max_track_misses_ = std::max(0, max_track_misses_);
+
+    emergency_hold_sec_ = std::max(0.0, emergency_hold_sec_);
+    hazard_hold_sec_ = std::max(0.0, hazard_hold_sec_);
 
     zone_height_ = std::max(0.1, zone_height_);
     lidar_down_angle_deg_ = std::clamp(lidar_down_angle_deg_, 0.1, 89.0);
@@ -344,9 +264,9 @@ private:
     }
   }
 
-  // =========================================================
-  // INPUT CALLBACKS
-  // =========================================================
+  // ==========================================================================
+  // CALLBACKS
+  // ==========================================================================
   void speedCallback(const std_msgs::msg::Float32::SharedPtr msg)
   {
     ego_speed_live_mps_ = std::max(0.0f, msg->data);
@@ -361,9 +281,10 @@ private:
     tracks_ = parseTracks(*msg);
   }
 
-  // =========================================================
+  // ==========================================================================
   // PARSE TRACKS
-  // =========================================================
+  // Supports stride 13 and stride 19.
+  // ==========================================================================
   std::vector<TrackInput> parseTracks(const std_msgs::msg::Float32MultiArray & msg)
   {
     std::vector<TrackInput> tracks;
@@ -395,6 +316,7 @@ private:
       const std::size_t k = i * stride;
 
       TrackInput t;
+
       t.id = static_cast<int>(msg.data[k + 0]);
       t.x = msg.data[k + 1];
       t.y = msg.data[k + 2];
@@ -434,178 +356,152 @@ private:
     return tracks;
   }
 
-  // =========================================================
-  // FRAME / MATH HELPERS
-  // =========================================================
+  // ==========================================================================
+  // MATH / FRAME HELPERS
+  // ==========================================================================
   double degToRad(double deg) const
   {
     constexpr double pi = 3.14159265358979323846;
     return deg * pi / 180.0;
   }
 
-  double getCurrentEgoSpeed() const
+  double frontZoneOriginX() const
   {
-    if (have_ego_speed_) {
-      const double age = (this->now() - last_speed_time_).seconds();
-
-      if (age <= ego_speed_stale_timeout_sec_) {
-        return static_cast<double>(ego_speed_live_mps_);
-      }
-    }
-
-    return ego_speed_fallback_mps_;
+    // Front emergency/hazard is 180 graden vanuit de sensor/rosbag-origin.
+    // De sensor staat in de rosbag op x=0.
+    return 0.0;
   }
 
-  void toVehicleFrame(const TrackInput & t, double & x_v, double & y_v, double & z_v) const
+  double sideZoneFrontX() const
   {
-    x_v = static_cast<double>(t.x) + sensor_offset_x_;
-    y_v = static_cast<double>(t.y) + sensor_offset_y_;
-    z_v = static_cast<double>(t.z) + sensor_offset_z_;
+    // Side zones starten bij x=0 en lopen naar achteren langs truck/trailer.
+    return 0.0;
   }
 
-  double vehicleXToSensorX(double x_vehicle) const
+  double truckFrontX() const
   {
-    return x_vehicle - sensor_offset_x_;
+    // Informatief:
+    // Bij sensor_offset_x_ = -0.57 ligt de fysieke truckvoorkant in het
+    // sensor/rosbag-frame op x=+0.57.
+    return -sensor_offset_x_;
   }
 
-  double vehicleYToSensorY(double y_vehicle) const
+  void toDetectionFrame(const TrackInput & t, double & x_d, double & y_d, double & z_d) const
   {
-    return y_vehicle - sensor_offset_y_;
+    // x/y blijven in het LiDAR/rosbag-frame.
+    // Dus sensor-origin blijft x=0, y=0.
+    x_d = static_cast<double>(t.x) + sensor_offset_x_;
+    y_d = static_cast<double>(t.y) + sensor_offset_y_;
+
+    // z wordt naar grondreferentie gebracht:
+    // object-z t.o.v. sensor + sensorhoogte.
+    z_d = static_cast<double>(t.z) + sensor_offset_z_;
   }
 
-  double vehicleZToSensorZ(double z_vehicle) const
+  double horizontalRangeFromSensor(double x_detection, double y_detection) const
   {
-    return z_vehicle - sensor_offset_z_;
+    // In het LiDAR/rosbag-frame staat de sensor zelf op x=0.
+    return std::hypot(x_detection, y_detection - sensor_offset_y_);
   }
 
-  // Kept for compatibility / future use.
-  double stoppingDistance(double v, double a, double delay, double margin) const
-  {
-    if (a <= 0.0) {
-      return std::numeric_limits<double>::infinity();
-    }
-
-    return (v * v) / (2.0 * a) + v * delay + margin;
-  }
-
-  // =========================================================
-  // VLP-16 VISIBILITY HELPERS
-  // =========================================================
-  double horizontalRangeFromSensor(double x_vehicle, double y_vehicle) const
-  {
-    const double dx = x_vehicle - sensor_offset_x_;
-    const double dy = y_vehicle - sensor_offset_y_;
-    return std::hypot(dx, dy);
-  }
-
-  double lowerVisibleHeightAtXY(double x_vehicle, double y_vehicle) const
+  double lowerVisibleHeightAtXY(double x_detection, double y_detection) const
   {
     const double angle_rad = degToRad(lidar_down_angle_deg_);
-    const double range_xy = horizontalRangeFromSensor(x_vehicle, y_vehicle);
+    const double range_xy = horizontalRangeFromSensor(x_detection, y_detection);
     const double z = sensor_offset_z_ - std::tan(angle_rad) * range_xy;
-
     return std::clamp(z, 0.0, zone_height_);
   }
 
-  double upperVisibleHeightAtXY(double x_vehicle, double y_vehicle) const
+  double upperVisibleHeightAtXY(double x_detection, double y_detection) const
   {
     const double angle_rad = degToRad(lidar_up_angle_deg_);
-    const double range_xy = horizontalRangeFromSensor(x_vehicle, y_vehicle);
+    const double range_xy = horizontalRangeFromSensor(x_detection, y_detection);
     const double z = sensor_offset_z_ + std::tan(angle_rad) * range_xy;
-
     return std::clamp(z, 0.0, zone_height_);
   }
 
   bool verticalIntervalIntersectsVlp16Frustum(
-    double x_vehicle,
-    double y_vehicle,
+    double x_detection,
+    double y_detection,
     double object_bottom_z,
     double object_top_z) const
   {
-    const double low = lowerVisibleHeightAtXY(x_vehicle, y_vehicle);
-    const double high = upperVisibleHeightAtXY(x_vehicle, y_vehicle);
+    const double low = lowerVisibleHeightAtXY(x_detection, y_detection);
+    const double high = upperVisibleHeightAtXY(x_detection, y_detection);
 
-    return object_top_z >= low && object_bottom_z <= high;
+    // Gedeeltelijke overlap is voldoende.
+    // Object-interval [bottom, top] hoeft het LiDAR-zichtinterval [low, high]
+    // alleen maar te raken.
+    const double bottom = std::min(object_bottom_z, object_top_z);
+    const double top = std::max(object_bottom_z, object_top_z);
+
+    return top >= low && bottom <= high;
   }
 
-  // =========================================================
-  // DETECTION ZONE CLASSIFICATION
-  // This is the same geometry as RViz.
-  // =========================================================
-  ZoneLevel classifyPointZone(
-    double x_vehicle,
-    double y_vehicle,
+  // ==========================================================================
+  // DETECTION CLASSIFICATION
+  // Detection geometry == RViz geometry.
+  // ==========================================================================
+  ZoneLevel classifyPoint3D(
+    double x,
+    double y,
     double object_bottom_z,
     double object_top_z) const
   {
     if (!verticalIntervalIntersectsVlp16Frustum(
-          x_vehicle,
-          y_vehicle,
+          x,
+          y,
           object_bottom_z,
           object_top_z))
     {
       return ZoneLevel::Free;
     }
 
-    // Front/cab semicircle:
-    // angle -90 deg -> +90 deg
-    // radius 0 -> emergency_distance / hazard_distance
-    const double r = std::hypot(x_vehicle, y_vehicle);
-    const double angle = std::atan2(y_vehicle, x_vehicle);
+    const double x_rel_front = x - frontZoneOriginX();
+    const double y_rel_front = y;
 
+    const double r = std::hypot(x_rel_front, y_rel_front);
+    const double angle = std::atan2(y_rel_front, x_rel_front);
+
+    // Frontsector:
+    // 180 graden voor de sensor, dus x >= 0 in het LiDAR/rosbag-frame.
     const bool in_front_sector =
       (angle >= -degToRad(90.0)) &&
       (angle <= degToRad(90.0)) &&
-      (x_vehicle >= 0.0);
+      (x_rel_front >= 0.0);
 
     if (in_front_sector) {
       if (r <= emergency_distance_) {
         return ZoneLevel::Emergency;
       }
 
-      if (r <= hazard_distance_) {
+      if (emergency_distance_ <= r && r <= hazard_distance_) {
         return ZoneLevel::Hazard;
       }
     }
 
-    // Side/trailer zones.
+    // Side zones:
+    // Alleen hazard. Rechthoeken links/rechts langs truck/trailer.
+    // Start bij x=0 en loopt naar achteren.
     if (enable_side_zones_) {
-      const double x0 = -side_zone_length_;
-      const double x1 = 0.0;
+      const double side_front_x = sideZoneFrontX();
 
-      const bool in_side_x = (x_vehicle >= x0 && x_vehicle <= x1);
+      const bool in_side_x =
+        (x <= side_front_x) &&
+        (x >= side_front_x - side_zone_length_);
 
       if (in_side_x) {
-        const double emergency_w = side_zone_width_ / 2.0;
-        const double hazard_w = side_zone_width_ / 2.0;
+        const double half = side_zone_width_ / 2.0;
 
-        const double left_em_y0 = side_zone_offset_y_ - emergency_w;
-        const double left_em_y1 = side_zone_offset_y_;
-        const double left_hz_y0 = side_zone_offset_y_;
-        const double left_hz_y1 = side_zone_offset_y_ + hazard_w;
+        const bool left_hazard =
+          (y >= side_zone_offset_y_ - half) &&
+          (y <= side_zone_offset_y_ + half);
 
-        const double right_em_y0 = -side_zone_offset_y_;
-        const double right_em_y1 = -side_zone_offset_y_ + emergency_w;
-        const double right_hz_y0 = -side_zone_offset_y_ - hazard_w;
-        const double right_hz_y1 = -side_zone_offset_y_;
+        const bool right_hazard =
+          (y >= -side_zone_offset_y_ - half) &&
+          (y <= -side_zone_offset_y_ + half);
 
-        const bool in_left_em =
-          y_vehicle >= left_em_y0 && y_vehicle <= left_em_y1;
-
-        const bool in_right_em =
-          y_vehicle >= right_em_y0 && y_vehicle <= right_em_y1;
-
-        if (in_left_em || in_right_em) {
-          return ZoneLevel::Emergency;
-        }
-
-        const bool in_left_hz =
-          y_vehicle >= left_hz_y0 && y_vehicle <= left_hz_y1;
-
-        const bool in_right_hz =
-          y_vehicle >= right_hz_y0 && y_vehicle <= right_hz_y1;
-
-        if (in_left_hz || in_right_hz) {
+        if (left_hazard || right_hazard) {
           return ZoneLevel::Hazard;
         }
       }
@@ -614,50 +510,47 @@ private:
     return ZoneLevel::Free;
   }
 
-  ZoneLevel classifyObjectZone(const TrackInput & t) const
+  ZoneLevel classifyObject(const TrackInput & t) const
   {
     const double half_x = 0.5 * std::max(0.0f, t.dx);
     const double half_y = 0.5 * std::max(0.0f, t.dy);
     const double half_z = 0.5 * std::max(0.0f, t.dz);
 
-    double x_v = 0.0;
-    double y_v = 0.0;
-    double z_v = 0.0;
+    double x_d = 0.0;
+    double y_d = 0.0;
+    double z_d = 0.0;
 
-    toVehicleFrame(t, x_v, y_v, z_v);
+    toDetectionFrame(t, x_d, y_d, z_d);
 
-    const double x_min = x_v - half_x;
-    const double x_max = x_v + half_x;
-    const double y_min = y_v - half_y;
-    const double y_max = y_v + half_y;
+    const double x_min = x_d - half_x;
+    const double x_max = x_d + half_x;
+    const double y_min = y_d - half_y;
+    const double y_max = y_d + half_y;
 
-    const double object_bottom_z = z_v - half_z;
-    const double object_top_z = z_v + half_z;
+    const double object_bottom_z = z_d - half_z;
+    const double object_top_z = z_d + half_z;
 
     std::vector<std::pair<double, double>> samples;
-    samples.reserve(6);
+    samples.reserve(9);
 
-    // Center.
-    samples.emplace_back(x_v, y_v);
+    // 3x3 raster over de bounding box.
+    // Hierdoor triggert een object ook als alleen een corner in de zone valt.
+    const double xs[3] = {x_min, x_d, x_max};
+    const double ys[3] = {y_min, y_d, y_max};
 
-    // Footprint corners.
-    samples.emplace_back(x_min, y_min);
-    samples.emplace_back(x_min, y_max);
-    samples.emplace_back(x_max, y_min);
-    samples.emplace_back(x_max, y_max);
-
-    // Closest point of bbox footprint to front/cab origin.
-    const double closest_x = std::clamp(0.0, x_min, x_max);
-    const double closest_y = std::clamp(0.0, y_min, y_max);
-    samples.emplace_back(closest_x, closest_y);
+    for (double xx : xs) {
+      for (double yy : ys) {
+        samples.emplace_back(xx, yy);
+      }
+    }
 
     ZoneLevel best = ZoneLevel::Free;
 
-    for (const auto & s : samples) {
+    for (const auto & sample : samples) {
       const ZoneLevel zone =
-        classifyPointZone(
-          s.first,
-          s.second,
+        classifyPoint3D(
+          sample.first,
+          sample.second,
           object_bottom_z,
           object_top_z);
 
@@ -673,239 +566,11 @@ private:
     return best;
   }
 
-  // =========================================================
-  // VISUALIZATION HELPERS
-  // =========================================================
-  geometry_msgs::msg::Point makePointVehicle(
-    double x_vehicle,
-    double y_vehicle,
-    double z_vehicle) const
+  int computeSafety()
   {
-    geometry_msgs::msg::Point p;
-    p.x = vehicleXToSensorX(x_vehicle);
-    p.y = vehicleYToSensorY(y_vehicle);
-    p.z = vehicleZToSensorZ(z_vehicle);
-
-    return p;
-  }
-
-  void addTwoSidedTriangle(
-    std::vector<geometry_msgs::msg::Point> & pts,
-    const geometry_msgs::msg::Point & a,
-    const geometry_msgs::msg::Point & b,
-    const geometry_msgs::msg::Point & c) const
-  {
-    pts.push_back(a);
-    pts.push_back(b);
-    pts.push_back(c);
-
-    pts.push_back(c);
-    pts.push_back(b);
-    pts.push_back(a);
-  }
-
-  visualization_msgs::msg::Marker makeVlp16FrustumZoneMarker(
-    int id,
-    double x0_vehicle,
-    double x1_vehicle,
-    double y0_vehicle,
-    double y1_vehicle,
-    float r,
-    float g,
-    float b,
-    float a) const
-  {
-    visualization_msgs::msg::Marker m;
-    m.header.frame_id = marker_frame_id_;
-    m.header.stamp = this->now();
-    m.ns = "zones";
-    m.id = id;
-    m.type = visualization_msgs::msg::Marker::TRIANGLE_LIST;
-    m.action = visualization_msgs::msg::Marker::ADD;
-
-    m.pose.orientation.w = 1.0;
-
-    m.scale.x = 1.0;
-    m.scale.y = 1.0;
-    m.scale.z = 1.0;
-
-    m.color.r = r;
-    m.color.g = g;
-    m.color.b = b;
-    m.color.a = a;
-
-    const double zA_low = lowerVisibleHeightAtXY(x0_vehicle, y0_vehicle);
-    const double zB_low = lowerVisibleHeightAtXY(x0_vehicle, y1_vehicle);
-    const double zC_low = lowerVisibleHeightAtXY(x1_vehicle, y1_vehicle);
-    const double zD_low = lowerVisibleHeightAtXY(x1_vehicle, y0_vehicle);
-
-    const double zA_high = upperVisibleHeightAtXY(x0_vehicle, y0_vehicle);
-    const double zB_high = upperVisibleHeightAtXY(x0_vehicle, y1_vehicle);
-    const double zC_high = upperVisibleHeightAtXY(x1_vehicle, y1_vehicle);
-    const double zD_high = upperVisibleHeightAtXY(x1_vehicle, y0_vehicle);
-
-    const auto A = makePointVehicle(x0_vehicle, y0_vehicle, zA_low);
-    const auto B = makePointVehicle(x0_vehicle, y1_vehicle, zB_low);
-    const auto C = makePointVehicle(x1_vehicle, y1_vehicle, zC_low);
-    const auto D = makePointVehicle(x1_vehicle, y0_vehicle, zD_low);
-
-    const auto E = makePointVehicle(x0_vehicle, y0_vehicle, zA_high);
-    const auto F = makePointVehicle(x0_vehicle, y1_vehicle, zB_high);
-    const auto G = makePointVehicle(x1_vehicle, y1_vehicle, zC_high);
-    const auto H = makePointVehicle(x1_vehicle, y0_vehicle, zD_high);
-
-    // Lower surface.
-    addTwoSidedTriangle(m.points, A, B, C);
-    addTwoSidedTriangle(m.points, A, C, D);
-
-    // Upper surface.
-    addTwoSidedTriangle(m.points, E, G, F);
-    addTwoSidedTriangle(m.points, E, H, G);
-
-    // x0 wall.
-    addTwoSidedTriangle(m.points, A, F, B);
-    addTwoSidedTriangle(m.points, A, E, F);
-
-    // x1 wall.
-    addTwoSidedTriangle(m.points, D, C, G);
-    addTwoSidedTriangle(m.points, D, G, H);
-
-    // y0 wall.
-    addTwoSidedTriangle(m.points, A, D, H);
-    addTwoSidedTriangle(m.points, A, H, E);
-
-    // y1 wall.
-    addTwoSidedTriangle(m.points, B, F, G);
-    addTwoSidedTriangle(m.points, B, G, C);
-
-    return m;
-  }
-
-  visualization_msgs::msg::Marker makeSectorZoneMarkerClassified(
-    int id,
-    ZoneLevel target_zone,
-    double r_min,
-    double r_max,
-    double angle_min_rad,
-    double angle_max_rad,
-    int steps,
-    float cr,
-    float cg,
-    float cb,
-    float ca) const
-  {
-    visualization_msgs::msg::Marker m;
-    m.header.frame_id = marker_frame_id_;
-    m.header.stamp = this->now();
-    m.ns = "zones_sector";
-    m.id = id;
-    m.type = visualization_msgs::msg::Marker::TRIANGLE_LIST;
-    m.action = visualization_msgs::msg::Marker::ADD;
-
-    m.pose.orientation.w = 1.0;
-
-    m.scale.x = 1.0;
-    m.scale.y = 1.0;
-    m.scale.z = 1.0;
-
-    m.color.r = cr;
-    m.color.g = cg;
-    m.color.b = cb;
-    m.color.a = ca;
-
-    const int N = std::max(3, steps);
-    const double dtheta =
-      (angle_max_rad - angle_min_rad) / static_cast<double>(N - 1);
-
-    std::vector<double> thetas(N);
-
-    for (int i = 0; i < N; ++i) {
-      thetas[i] = angle_min_rad + static_cast<double>(i) * dtheta;
-    }
-
-    struct SamplePoint
-    {
-      geometry_msgs::msg::Point low;
-      geometry_msgs::msg::Point high;
-    };
-
-    std::vector<SamplePoint> inner(N);
-    std::vector<SamplePoint> outer(N);
-
-    for (int i = 0; i < N; ++i) {
-      const double theta = thetas[i];
-      const double cos_t = std::cos(theta);
-      const double sin_t = std::sin(theta);
-
-      const double xi_inner = r_min * cos_t;
-      const double yi_inner = r_min * sin_t;
-      const double z_il = lowerVisibleHeightAtXY(xi_inner, yi_inner);
-      const double z_ih = upperVisibleHeightAtXY(xi_inner, yi_inner);
-
-      inner[i].low = makePointVehicle(xi_inner, yi_inner, z_il);
-      inner[i].high = makePointVehicle(xi_inner, yi_inner, z_ih);
-
-      const double xi_outer = r_max * cos_t;
-      const double yi_outer = r_max * sin_t;
-      const double z_ol = lowerVisibleHeightAtXY(xi_outer, yi_outer);
-      const double z_oh = upperVisibleHeightAtXY(xi_outer, yi_outer);
-
-      outer[i].low = makePointVehicle(xi_outer, yi_outer, z_ol);
-      outer[i].high = makePointVehicle(xi_outer, yi_outer, z_oh);
-    }
-
-    for (int i = 0; i < N - 1; ++i) {
-      const double mid_theta = 0.5 * (thetas[i] + thetas[i + 1]);
-      const double mid_r = 0.5 * (r_min + r_max);
-
-      const double mx = mid_r * std::cos(mid_theta);
-      const double my = mid_r * std::sin(mid_theta);
-
-      const ZoneLevel mid_zone =
-        classifyPointZone(
-          mx,
-          my,
-          0.0,
-          zone_height_);
-
-      if (mid_zone != target_zone) {
-        continue;
-      }
-
-      // Lower surface.
-      addTwoSidedTriangle(m.points, inner[i].low, outer[i].low, outer[i + 1].low);
-      addTwoSidedTriangle(m.points, inner[i].low, outer[i + 1].low, inner[i + 1].low);
-
-      // Upper surface.
-      addTwoSidedTriangle(m.points, inner[i].high, inner[i + 1].high, outer[i + 1].high);
-      addTwoSidedTriangle(m.points, inner[i].high, outer[i + 1].high, outer[i].high);
-
-      // Outer wall.
-      addTwoSidedTriangle(m.points, outer[i].low, outer[i].high, outer[i + 1].high);
-      addTwoSidedTriangle(m.points, outer[i].low, outer[i + 1].high, outer[i + 1].low);
-
-      // Inner wall if r_min > 0.
-      if (r_min > 1e-6) {
-        addTwoSidedTriangle(m.points, inner[i].low, inner[i + 1].high, inner[i].high);
-        addTwoSidedTriangle(m.points, inner[i].low, inner[i + 1].low, inner[i + 1].high);
-      }
-    }
-
-    return m;
-  }
-
-  // =========================================================
-  // CORE SAFETY LOGIC
-  // =========================================================
-  int computeRawSafetySignal(
-    const std::vector<TrackInput> & tracks,
-    double & min_front_distance_out)
-  {
-    min_front_distance_out = std::numeric_limits<double>::infinity();
-
     int signal = 2;
 
-    for (const auto & t : tracks) {
+    for (const auto & t : tracks_) {
       if (t.hits < min_track_hits_) {
         continue;
       }
@@ -914,7 +579,7 @@ private:
         continue;
       }
 
-      const ZoneLevel zone = classifyObjectZone(t);
+      const ZoneLevel zone = classifyObject(t);
 
       if (zone == ZoneLevel::Emergency) {
         return 0;
@@ -923,28 +588,309 @@ private:
       if (zone == ZoneLevel::Hazard) {
         signal = 1;
       }
-
-      // Diagnostics only.
-      double x_v = 0.0;
-      double y_v = 0.0;
-      double z_v = 0.0;
-
-      toVehicleFrame(t, x_v, y_v, z_v);
-
-      const double half_x = 0.5 * std::max(0.0f, t.dx);
-      const double object_front_edge = x_v - half_x;
-      const double front_distance = std::max(0.0, object_front_edge);
-
-      min_front_distance_out =
-        std::min(min_front_distance_out, front_distance);
     }
 
     return signal;
   }
 
-  // =========================================================
-  // TIMER / PUBLISH
-  // =========================================================
+  // ==========================================================================
+  // VISUALISATION HELPERS
+  // ==========================================================================
+  geometry_msgs::msg::Point point(double x, double y, double z) const
+  {
+    geometry_msgs::msg::Point p;
+    p.x = x;
+    p.y = y;
+    p.z = z;
+    return p;
+  }
+
+  void addTwoSidedTriangle(
+    std::vector<geometry_msgs::msg::Point> & points,
+    const geometry_msgs::msg::Point & a,
+    const geometry_msgs::msg::Point & b,
+    const geometry_msgs::msg::Point & c) const
+  {
+    points.push_back(a);
+    points.push_back(b);
+    points.push_back(c);
+
+    points.push_back(c);
+    points.push_back(b);
+    points.push_back(a);
+  }
+
+  visualization_msgs::msg::Marker makeSectorFrustum(
+    int id,
+    double r_min,
+    double r_max,
+    float red,
+    float green,
+    float blue,
+    float alpha) const
+  {
+    visualization_msgs::msg::Marker marker;
+
+    marker.header.frame_id = marker_frame_id_;
+    marker.header.stamp = this->now();
+
+    marker.ns = "zones";
+    marker.id = id;
+    marker.type = visualization_msgs::msg::Marker::TRIANGLE_LIST;
+    marker.action = visualization_msgs::msg::Marker::ADD;
+
+    marker.pose.orientation.w = 1.0;
+
+    marker.scale.x = 1.0;
+    marker.scale.y = 1.0;
+    marker.scale.z = 1.0;
+
+    marker.color.r = red;
+    marker.color.g = green;
+    marker.color.b = blue;
+    marker.color.a = alpha;
+
+    const int steps = std::max(6, sector_azimuth_steps_);
+    const double angle_min = -degToRad(90.0);
+    const double angle_max = degToRad(90.0);
+    const double dtheta = (angle_max - angle_min) / static_cast<double>(steps);
+
+    for (int i = 0; i < steps; ++i) {
+      const double a0 = angle_min + static_cast<double>(i) * dtheta;
+      const double a1 = angle_min + static_cast<double>(i + 1) * dtheta;
+
+      const double front_x = frontZoneOriginX();
+
+      const double x0i = front_x + r_min * std::cos(a0);
+      const double y0i = r_min * std::sin(a0);
+      const double x1i = front_x + r_min * std::cos(a1);
+      const double y1i = r_min * std::sin(a1);
+
+      const double x0o = front_x + r_max * std::cos(a0);
+      const double y0o = r_max * std::sin(a0);
+      const double x1o = front_x + r_max * std::cos(a1);
+      const double y1o = r_max * std::sin(a1);
+
+      const auto A0 = point(x0i, y0i, lowerVisibleHeightAtXY(x0i, y0i));
+      const auto B0 = point(x0o, y0o, lowerVisibleHeightAtXY(x0o, y0o));
+      const auto C0 = point(x1o, y1o, lowerVisibleHeightAtXY(x1o, y1o));
+      const auto D0 = point(x1i, y1i, lowerVisibleHeightAtXY(x1i, y1i));
+
+      const auto A1 = point(x0i, y0i, upperVisibleHeightAtXY(x0i, y0i));
+      const auto B1 = point(x0o, y0o, upperVisibleHeightAtXY(x0o, y0o));
+      const auto C1 = point(x1o, y1o, upperVisibleHeightAtXY(x1o, y1o));
+      const auto D1 = point(x1i, y1i, upperVisibleHeightAtXY(x1i, y1i));
+
+      // Onderkant
+      addTwoSidedTriangle(marker.points, A0, B0, C0);
+      addTwoSidedTriangle(marker.points, A0, C0, D0);
+
+      // Bovenkant
+      addTwoSidedTriangle(marker.points, A1, C1, B1);
+      addTwoSidedTriangle(marker.points, A1, D1, C1);
+
+      // Buitenboog
+      addTwoSidedTriangle(marker.points, B0, B1, C1);
+      addTwoSidedTriangle(marker.points, B0, C1, C0);
+
+      // Binnenboog, alleen bij hazard-ring.
+      if (r_min > 1e-6) {
+        addTwoSidedTriangle(marker.points, A0, D1, A1);
+        addTwoSidedTriangle(marker.points, A0, D0, D1);
+      }
+    }
+
+    return marker;
+  }
+
+  visualization_msgs::msg::Marker makeSideHazardFrustum(
+    int id,
+    double y_center) const
+  {
+    visualization_msgs::msg::Marker marker;
+
+    marker.header.frame_id = marker_frame_id_;
+    marker.header.stamp = this->now();
+
+    marker.ns = "zones";
+    marker.id = id;
+    marker.type = visualization_msgs::msg::Marker::TRIANGLE_LIST;
+    marker.action = visualization_msgs::msg::Marker::ADD;
+
+    marker.pose.orientation.w = 1.0;
+
+    marker.scale.x = 1.0;
+    marker.scale.y = 1.0;
+    marker.scale.z = 1.0;
+
+    marker.color.r = 1.0f;
+    marker.color.g = 0.5f;
+    marker.color.b = 0.0f;
+    marker.color.a = 0.25f;
+
+    const double side_front_x = sideZoneFrontX();
+    const double x0 = side_front_x - side_zone_length_;
+    const double x1 = side_front_x;
+
+    const double half = side_zone_width_ / 2.0;
+    const double y0 = y_center - half;
+    const double y1 = y_center + half;
+
+    const auto A0 = point(x0, y0, lowerVisibleHeightAtXY(x0, y0));
+    const auto B0 = point(x0, y1, lowerVisibleHeightAtXY(x0, y1));
+    const auto C0 = point(x1, y1, lowerVisibleHeightAtXY(x1, y1));
+    const auto D0 = point(x1, y0, lowerVisibleHeightAtXY(x1, y0));
+
+    const auto A1 = point(x0, y0, upperVisibleHeightAtXY(x0, y0));
+    const auto B1 = point(x0, y1, upperVisibleHeightAtXY(x0, y1));
+    const auto C1 = point(x1, y1, upperVisibleHeightAtXY(x1, y1));
+    const auto D1 = point(x1, y0, upperVisibleHeightAtXY(x1, y0));
+
+    // Onderkant
+    addTwoSidedTriangle(marker.points, A0, B0, C0);
+    addTwoSidedTriangle(marker.points, A0, C0, D0);
+
+    // Bovenkant
+    addTwoSidedTriangle(marker.points, A1, C1, B1);
+    addTwoSidedTriangle(marker.points, A1, D1, C1);
+
+    // Zijkanten
+    addTwoSidedTriangle(marker.points, A0, A1, B1);
+    addTwoSidedTriangle(marker.points, A0, B1, B0);
+
+    addTwoSidedTriangle(marker.points, D0, C0, C1);
+    addTwoSidedTriangle(marker.points, D0, C1, D1);
+
+    // Kopse kanten
+    addTwoSidedTriangle(marker.points, A0, D0, D1);
+    addTwoSidedTriangle(marker.points, A0, D1, A1);
+
+    addTwoSidedTriangle(marker.points, B0, B1, C1);
+    addTwoSidedTriangle(marker.points, B0, C1, C0);
+
+    return marker;
+  }
+
+  // ==========================================================================
+  // PUBLISH ZONES
+  // ==========================================================================
+  void publishZones()
+  {
+    visualization_msgs::msg::MarkerArray arr;
+
+    visualization_msgs::msg::Marker clear;
+    clear.header.frame_id = marker_frame_id_;
+    clear.header.stamp = this->now();
+    clear.ns = "zones";
+    clear.id = 0;
+    clear.action = visualization_msgs::msg::Marker::DELETEALL;
+
+    arr.markers.push_back(clear);
+
+    // Emergency: rood, 0 -> emergency_distance
+    arr.markers.push_back(
+      makeSectorFrustum(
+        1,
+        0.0,
+        emergency_distance_,
+        1.0f,
+        0.0f,
+        0.0f,
+        0.35f));
+
+    // Hazard: oranje, emergency_distance -> hazard_distance
+    arr.markers.push_back(
+      makeSectorFrustum(
+        2,
+        emergency_distance_,
+        hazard_distance_,
+        1.0f,
+        0.5f,
+        0.0f,
+        0.25f));
+
+    // Side hazard zones: oranje rechthoeken links/rechts
+    if (enable_side_zones_) {
+      arr.markers.push_back(
+        makeSideHazardFrustum(
+          3,
+          side_zone_offset_y_));
+
+      arr.markers.push_back(
+        makeSideHazardFrustum(
+          4,
+          -side_zone_offset_y_));
+    }
+
+    marker_pub_->publish(arr);
+  }
+
+  // ==========================================================================
+  // STATUS MARKER
+  // ==========================================================================
+  void publishStatusMarker(int signal)
+  {
+    visualization_msgs::msg::Marker bg;
+    bg.header.frame_id = marker_frame_id_;
+    bg.header.stamp = this->now();
+    bg.ns = "safety_status";
+    bg.id = 100;
+    bg.type = visualization_msgs::msg::Marker::CUBE;
+    bg.action = visualization_msgs::msg::Marker::ADD;
+
+    bg.scale.x = 2.0;
+    bg.scale.y = 0.1;
+    bg.scale.z = 0.5;
+    bg.pose.position.x = frontZoneOriginX() + 1.0;
+    bg.pose.position.y = 0.0;
+    bg.pose.position.z = 2.0;
+
+    bg.color.r = 0.0f;
+    bg.color.g = 0.0f;
+    bg.color.b = 0.0f;
+    bg.color.a = 0.8f;
+
+    status_marker_pub_->publish(bg);
+
+    visualization_msgs::msg::Marker txt;
+    txt.header.frame_id = marker_frame_id_;
+    txt.header.stamp = this->now();
+    txt.ns = "safety_status";
+    txt.id = 101;
+    txt.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
+    txt.action = visualization_msgs::msg::Marker::ADD;
+
+    txt.scale.z = 0.35;
+    txt.pose.position.x = frontZoneOriginX() + 1.0;
+    txt.pose.position.y = 0.0;
+    txt.pose.position.z = 2.0;
+
+    if (signal == 0) {
+      txt.text = "STOP";
+      txt.color.r = 1.0f;
+      txt.color.g = 0.0f;
+      txt.color.b = 0.0f;
+      txt.color.a = 1.0f;
+    } else if (signal == 1) {
+      txt.text = "WARNING";
+      txt.color.r = 1.0f;
+      txt.color.g = 0.5f;
+      txt.color.b = 0.0f;
+      txt.color.a = 1.0f;
+    } else {
+      txt.text = "FREE";
+      txt.color.r = 0.0f;
+      txt.color.g = 1.0f;
+      txt.color.b = 0.0f;
+      txt.color.a = 1.0f;
+    }
+
+    status_marker_pub_->publish(txt);
+  }
+
+  // ==========================================================================
+  // TIMER
+  // ==========================================================================
   void timerCallback()
   {
     const double tracks_age = (this->now() - last_tracks_time_).seconds();
@@ -954,12 +900,11 @@ private:
       stale_msg.data = static_cast<int16_t>(stale_signal_);
       pub_->publish(stale_msg);
       publishZones();
+      publishStatusMarker(stale_msg.data);
       return;
     }
 
-    double min_front_distance = std::numeric_limits<double>::infinity();
-    const int raw_signal = computeRawSafetySignal(tracks_, min_front_distance);
-
+    const int raw_signal = computeSafety();
     const auto now = this->now();
 
     if (raw_signal == 0) {
@@ -985,143 +930,26 @@ private:
       }
     }
 
-    std_msgs::msg::Int16 out;
-    out.data = static_cast<int16_t>(latched_signal_);
-    pub_->publish(out);
+    std_msgs::msg::Int16 msg;
+    msg.data = static_cast<int16_t>(latched_signal_);
+    pub_->publish(msg);
+
+    publishStatusMarker(latched_signal_);
+    publishZones();
 
     if (debug_ && (frame_count_ % debug_every_n_frames_) == 0) {
       RCLCPP_INFO(
         this->get_logger(),
-        "raw_signal=%d latched_signal=%d ego_speed=%.3f m/s tracks=%zu min_front=%.2f",
+        "raw_signal=%d latched_signal=%d tracks=%zu",
         raw_signal,
         latched_signal_,
-        getCurrentEgoSpeed(),
-        tracks_.size(),
-        std::isfinite(min_front_distance) ? min_front_distance : -1.0);
+        tracks_.size());
     }
-
-    publishZones();
   }
 
-  // =========================================================
-  // PUBLISH ZONES
-  // Visualization equals detection geometry.
-  // =========================================================
-  void publishZones()
-  {
-    visualization_msgs::msg::MarkerArray arr;
-
-    visualization_msgs::msg::Marker clear;
-    clear.header.frame_id = marker_frame_id_;
-    clear.header.stamp = this->now();
-    clear.ns = "zones";
-    clear.id = 0;
-    clear.action = visualization_msgs::msg::Marker::DELETEALL;
-    arr.markers.push_back(clear);
-
-    clear.ns = "zones_sector";
-    clear.id = 1000;
-    arr.markers.push_back(clear);
-
-    const double angle_min = -degToRad(90.0);
-    const double angle_max = degToRad(90.0);
-
-    // Front / cab emergency sector.
-    arr.markers.push_back(
-      makeSectorZoneMarkerClassified(
-        2,
-        ZoneLevel::Emergency,
-        0.0,
-        emergency_distance_,
-        angle_min,
-        angle_max,
-        sector_azimuth_steps_,
-        1.0f,
-        0.0f,
-        0.0f,
-        0.35f));
-
-    // Front / cab hazard sector.
-    arr.markers.push_back(
-      makeSectorZoneMarkerClassified(
-        1,
-        ZoneLevel::Hazard,
-        emergency_distance_,
-        hazard_distance_,
-        angle_min,
-        angle_max,
-        sector_azimuth_steps_,
-        1.0f,
-        0.5f,
-        0.0f,
-        0.25f));
-
-    if (enable_side_zones_) {
-      const double x0 = -side_zone_length_;
-      const double x1 = 0.0;
-
-      const double emergency_w = side_zone_width_ / 2.0;
-      const double hazard_w = side_zone_width_ / 2.0;
-
-      // Left emergency.
-      arr.markers.push_back(
-        makeVlp16FrustumZoneMarker(
-          20,
-          x0,
-          x1,
-          side_zone_offset_y_ - emergency_w,
-          side_zone_offset_y_,
-          1.0f,
-          0.0f,
-          0.0f,
-          0.35f));
-
-      // Left hazard.
-      arr.markers.push_back(
-        makeVlp16FrustumZoneMarker(
-          21,
-          x0,
-          x1,
-          side_zone_offset_y_,
-          side_zone_offset_y_ + hazard_w,
-          1.0f,
-          0.5f,
-          0.0f,
-          0.25f));
-
-      // Right emergency.
-      arr.markers.push_back(
-        makeVlp16FrustumZoneMarker(
-          30,
-          x0,
-          x1,
-          -side_zone_offset_y_,
-          -side_zone_offset_y_ + emergency_w,
-          1.0f,
-          0.0f,
-          0.0f,
-          0.35f));
-
-      // Right hazard.
-      arr.markers.push_back(
-        makeVlp16FrustumZoneMarker(
-          31,
-          x0,
-          x1,
-          -side_zone_offset_y_ - hazard_w,
-          -side_zone_offset_y_,
-          1.0f,
-          0.5f,
-          0.0f,
-          0.25f));
-    }
-
-    marker_pub_->publish(arr);
-  }
-
-  // =========================================================
+  // ==========================================================================
   // MEMBERS
-  // =========================================================
+  // ==========================================================================
   std::string input_topic_;
   std::string output_topic_;
   std::string ego_speed_topic_;
@@ -1139,48 +967,20 @@ private:
   double sensor_offset_y_ = 0.0;
   double sensor_offset_z_ = 1.8;
 
-  double corridor_half_width_ = 1.0;
-  double min_x_consider_ = 0.0;
-  double max_x_consider_ = 20.0;
-
   double emergency_distance_ = 1.5;
   double hazard_distance_ = 2.5;
 
-  bool enable_ttc_ = true;
-  double emergency_ttc_ = 0.6;
-  double hazard_ttc_ = 1.5;
-  double min_closing_speed_ = 0.10;
+  bool enable_side_zones_ = true;
+  double side_zone_length_ = 2.0;
+  double side_zone_width_ = 0.8;
+  double side_zone_offset_y_ = 0.8;
 
   int min_track_hits_ = 1;
   int max_track_misses_ = 2;
 
-  bool enable_cut_in_prediction_ = true;
-  double hazard_prediction_horizon_ = 1.5;
-  double emergency_prediction_horizon_ = 0.5;
-  double min_lateral_speed_ = 0.10;
 
-  double emergency_hold_sec_ = 0.30;
-  double hazard_hold_sec_ = 0.50;
-
-  bool enable_brake_model_ = true;
-  double ego_speed_fallback_mps_ = 1.3889;
-  double max_decel_mps2_ = 1.5;
-  double system_delay_sec_ = 0.30;
-  double emergency_margin_m_ = 0.10;
-  double hazard_margin_m_ = 0.25;
-
-  bool enable_side_zones_ = true;
-  double side_zone_length_ = 6.0;
-  double side_zone_width_ = 0.6;
-  double side_zone_offset_y_ = 1.2;
-  double min_side_approach_speed_ = 0.10;
-
-  double emergency_distance_hysteresis_ = 0.30;
-  double hazard_distance_hysteresis_ = 0.30;
-  double emergency_ttc_hysteresis_ = 0.20;
-  double hazard_ttc_hysteresis_ = 0.20;
-  double side_zone_hysteresis_x_ = 0.20;
-  double side_zone_hysteresis_y_ = 0.10;
+  double emergency_hold_sec_ = 0.25;
+  double hazard_hold_sec_ = 0.25;
 
   double zone_height_ = 3.0;
   double lidar_down_angle_deg_ = 15.0;
@@ -1190,11 +990,12 @@ private:
 
   bool debug_ = true;
   int debug_every_n_frames_ = 1;
-  bool debug_timer_ = true;
 
   std::vector<TrackInput> tracks_;
+
   bool have_ego_speed_ = false;
   float ego_speed_live_mps_ = 0.0f;
+
   int latched_signal_ = 2;
   long frame_count_ = 0;
 
@@ -1207,6 +1008,7 @@ private:
   rclcpp::Subscription<std_msgs::msg::Float32>::SharedPtr speed_sub_;
   rclcpp::Publisher<std_msgs::msg::Int16>::SharedPtr pub_;
   rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr marker_pub_;
+  rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr status_marker_pub_;
   rclcpp::TimerBase::SharedPtr timer_;
 };
 

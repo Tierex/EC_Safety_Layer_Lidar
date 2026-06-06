@@ -90,10 +90,10 @@ private:
     this->declare_parameter<bool>("reliable_qos", false);
     this->declare_parameter<int>("process_every_n_frames", 1);
 
-    this->declare_parameter<double>("roi_x_min", 0.0);
-    this->declare_parameter<double>("roi_x_max", 10.0);
-    this->declare_parameter<double>("roi_y_min", -10.0);
-    this->declare_parameter<double>("roi_y_max", 10.0);
+    this->declare_parameter<double>("roi_x_min", -4.0);
+    this->declare_parameter<double>("roi_x_max", 4.0);
+    this->declare_parameter<double>("roi_y_min", -3.0);
+    this->declare_parameter<double>("roi_y_max", 3.0);
     this->declare_parameter<double>("roi_z_min", -3.0);
     this->declare_parameter<double>("roi_z_max", 3.0);
 
@@ -112,8 +112,8 @@ private:
     this->declare_parameter<double>("min_y_size", 0.15);
     this->declare_parameter<double>("min_z_size", 0.30);
 
-    this->declare_parameter<double>("max_x_size", 1.20);
-    this->declare_parameter<double>("max_y_size", 1.20);
+    this->declare_parameter<double>("max_x_size", 0.80);
+    this->declare_parameter<double>("max_y_size", 0.80);
     this->declare_parameter<double>("max_z_size", 2.00);
 
     this->declare_parameter<bool>("debug", false);
@@ -567,10 +567,10 @@ private:
   bool reliable_qos_ = false;
   int process_every_n_frames_ = 1;
 
-  double roi_x_min_ = 0.0;
-  double roi_x_max_ = 10.0;
-  double roi_y_min_ = -10.0;
-  double roi_y_max_ = 10.0;
+  double roi_x_min_ = -4.0;
+  double roi_x_max_ = 4.0;
+  double roi_y_min_ = -3.0;
+  double roi_y_max_ = 3.0;
   double roi_z_min_ = -3.0;
   double roi_z_max_ = 3.0;
 
@@ -585,19 +585,19 @@ private:
   int min_cluster_size_ = 8;
   int max_cluster_size_ = 2000;
 
-  double min_x_size_ = 0.15;
-  double min_y_size_ = 0.15;
+  double min_x_size_ = 0.25;
+  double min_y_size_ = 0.25;
   double min_z_size_ = 0.70;
 
-  double max_x_size_ = 1.20;
-  double max_y_size_ = 1.20;
+  double max_x_size_ = 0.80;
+  double max_y_size_ = 0.80;
   double max_z_size_ = 2.30;
 
   bool debug_ = false;
   int debug_every_n_frames_ = 30;
   bool debug_objects_ = false;
 
-  bool publish_markers_ = false;
+  bool publish_markers_ = true;
   double marker_lifetime_ = 0.25;
 
   double first_source_stamp_sec_ = -1.0;

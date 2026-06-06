@@ -5,6 +5,8 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <iomanip>
+#include <sstream>
 
 #include "rclcpp/rclcpp.hpp"
 #include "std_msgs/msg/float32_multi_array.hpp"
@@ -102,7 +104,7 @@ private:
     this->declare_parameter<double>("max_dt", 0.5);
     this->declare_parameter<double>("min_dt", 0.001);
 
-    this->declare_parameter<bool>("publish_markers", false);
+    this->declare_parameter<bool>("publish_markers", true);
     this->declare_parameter<double>("marker_lifetime", 0.25);
 
     this->declare_parameter<bool>("debug", false);
@@ -464,16 +466,42 @@ private:
       text.id = id++;
       text.type = visualization_msgs::msg::Marker::TEXT_VIEW_FACING;
       text.action = visualization_msgs::msg::Marker::ADD;
+
       text.pose.position.x = t.x;
       text.pose.position.y = t.y;
       text.pose.position.z = t.z + 0.5f * t.dz + 0.25f;
       text.pose.orientation.w = 1.0;
+
       text.scale.z = 0.25;
+
       text.color.r = 1.0f;
       text.color.g = 1.0f;
       text.color.b = 1.0f;
       text.color.a = 1.0f;
-      text.text = "track " + std::to_string(t.id) + "\nv=" + std::to_string(closingSpeed(t)).substr(0, 4);
+
+      const float range_xy = distanceXY(t);
+      const float closing_speed = closingSpeed(t);
+
+      char range_text[16];
+      char speed_text[16];
+
+      std::snprintf(
+        range_text,
+        sizeof(range_text),
+        "%.2f",
+        range_xy);
+
+      std::snprintf(
+        speed_text,
+        sizeof(speed_text),
+        "%.2f",
+        closing_speed);
+
+      text.text =
+        "id " + std::to_string(t.id) +
+        "\nr=" + std::string(range_text) + " m" +
+        "\nv=" + std::string(speed_text) + " m/s";
+
       setLifetime(text);
       arr.markers.push_back(text);
     }
@@ -518,7 +546,7 @@ private:
   double max_dt_ = 0.5;
   double min_dt_ = 0.001;
 
-  bool publish_markers_ = false;
+  bool publish_markers_ = true;
   double marker_lifetime_ = 0.25;
 
   bool debug_ = false;

@@ -30,12 +30,14 @@ def generate_launch_description():
             'launch'
         )
 
+        velodyne_launch_file = os.path.join(
+            velodyne_launch_dir,
+            'velodyne-all-nodes-VLP16-launch.py'
+        )
+
         velodyne_launch = IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
-                os.path.join(
-                    velodyne_launch_dir,
-                    'velodyne-all-nodes-VLP16-launch.py'
-                )
+                velodyne_launch_file
             )
         )
 
@@ -51,13 +53,15 @@ def generate_launch_description():
     # =========================================================
     # Object detection + tracker + safety supervisor
     # =========================================================
+    object_detection_launch_file = os.path.join(
+        obj_det_pkg_dir,
+        'launch',
+        'minimal_lidar_safety.launch.py'
+    )
+
     object_detection_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(
-                obj_det_pkg_dir,
-                'launch',
-                'minimal_lidar_safety.launch.py'
-            )
+            object_detection_launch_file
         )
     )
 
@@ -93,11 +97,13 @@ def generate_launch_description():
     # Safety overlay node
     #
     # BELANGRIJK:
-    # Deze staat uit omdat safety_supervisor nu zelf
-    # /safety_zones_array publiceert.
+    # Deze node wordt NIET gestart.
     #
-    # Als safety_overlay_node ook markers publiceert op
-    # /safety_zones, dan krijg je opnieuw topic-conflicten.
+    # safety_supervisor publiceert zelf:
+    #   /safety_zones_array
+    #
+    # Als safety_overlay_node ook markers publiceert op /safety_zones,
+    # krijg je opnieuw topic/RViz-conflicten.
     # =========================================================
 
     # safety_overlay_node = Node(

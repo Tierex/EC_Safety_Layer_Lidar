@@ -15,80 +15,46 @@ safety_supervisor:
     publish_rate_hz: 20.0
 
     # =========================================================
-    # Fail-safe gedrag
+    # Fail-safe
     # =========================================================
     stale_timeout_sec: 0.5
     stale_signal: 0
     ego_speed_stale_timeout_sec: 1.0
 
     # =========================================================
-    # Sensor offset (LiDAR → voertuig)
-    #
-    # Vehicle frame:
-    # x = 0 bij voorkant truck
-    # x positief naar voren
-    # y positief naar links
-    # z positief omhoog vanaf grond
+    # Sensor offset: LiDAR t.o.v. safety_base
+    # safety_base: x=0 voorkant truck, y=0 middenlijn, z=0 grond
     # =========================================================
     sensor_offset_x: -0.57
     sensor_offset_y: 0.0
     sensor_offset_z: 1.8
 
     # =========================================================
-    # FRONT / CAB DETECTIEZONES
-    #
-    # Nieuwe logica:
-    # Emergency = halve cirkel/sector 0.0 → 1.5 m
-    # Hazard    = halve ring/sector 1.5 → 2.5 m
-    #
-    # Hoek loopt van -90° tot +90° t.o.v. rijrichting
+    # Front/cab zones
+    # Emergency: 0.0 -> 1.5 m
+    # Hazard:    1.5 -> 2.5 m
     # =========================================================
-    corridor_half_width: 1.0
-    min_x_consider: 0.0
-    max_x_consider: 20.0
-
     emergency_distance: 1.5
     hazard_distance: 2.5
 
-    # Aantal segmenten voor de halve cirkel in RViz.
-    # Hoger = vloeiender, lager = lichter.
-    sector_azimuth_steps: 120
-
     # =========================================================
-    # VLP-16 zichtvolume
-    #
-    # VLP-16 vertical FOV:
-    # +15° omhoog
-    # -15° omlaag
-    # =========================================================
-    lidar_down_angle_deg: 15.0
-    lidar_up_angle_deg: 15.0
-
-    # =========================================================
-    # SIDE ZONES
-    #
-    # Deze zones zijn exact gelijk aan wat RViz tekent.
-    # Binnenste helft = emergency
-    # Buitenste helft = hazard
-    # =========================================================
-    enable_side_zones: true
-
-    side_zone_length: 6.0
-    side_zone_width: 0.6
-    side_zone_offset_y: 1.2
+    # Side/trailer zones
+    # Alleen HAZARDysteresis: 0.20    # Alleen HAZARD, nooit emergency
+    side_zone_hysteresis_x: 0.20
+    side_zone_hysteresis_y: 0.10
     min_side_approach_speed: 0.10
 
     # =========================================================
-    # TTC
-    #
-    # Let op:
-    # In de huidige versie bepaalt de geometrische zone de output.
-    # Deze parameters blijven staan voor compatibiliteit.
+    # Debug
     # =========================================================
-    enable_ttc: true
-    emergency_ttc: 0.6
-    hazard_ttc: 1.5
-    min_closing_speed: 0.10
+    debug: true
+    debug_every_n_frames: 1
+    debug_timer: true
+    # =========================================================
+    enable_side_zones: true
+    side_zone_length: 6.0
+    side_zone_width: 0.6
+    side_zone_offset_y: 0.5
 
     # =========================================================
     # Track filtering
@@ -97,69 +63,51 @@ safety_supervisor:
     max_track_misses: 2
 
     # =========================================================
-    # Cut-in prediction
-    #
-    # Let op:
-    # In de huidige versie bepaalt de geometrische zone de output.
-    # Deze parameters blijven staan voor compatibiliteit.
-    # =========================================================
-    enable_cut_in_prediction: true
-    hazard_prediction_horizon: 1.5
-    emergency_prediction_horizon: 0.5
-    min_lateral_speed: 0.10
-
-    # =========================================================
-    # HOLD TIMES
-    #
-    # Deze worden nog gebruikt voor stabiele output.
+    # Hold times
     # =========================================================
     emergency_hold_sec: 0.30
     hazard_hold_sec: 0.50
 
     # =========================================================
-    # HYSTERESIS
-    #
-    # Let op:
-    # In de huidige geometrische versie worden deze niet gebruikt
-    # voor zonegrenzen, maar ze mogen blijven staan.
+    # VLP-16 vertical FOV
     # =========================================================
-    emergency_distance_hysteresis: 0.30
-    hazard_distance_hysteresis: 0.30
-
-    emergency_ttc_hysteresis: 0.20
-    hazard_ttc_hysteresis: 0.20
-
-    side_zone_hysteresis_x: 0.20
-    side_zone_hysteresis_y: 0.10
+    zone_height: 3.0
+    lidar_down_angle_deg: 15.0
+    lidar_up_angle_deg: 15.0
 
     # =========================================================
-    # Physics brake model
-    #
-    # Let op:
-    # In de huidige versie bepaalt de geometrische zone de output.
-    # Deze parameters blijven staan voor compatibiliteit.
+    # RViz markers
     # =========================================================
+    marker_topic: /safety_zones_array
+    marker_frame_id: safety_base
+    sector_azimuth_steps: 120
+
+    # =========================================================
+    # Compatibility parameters
+    # These remain here so older launch/config does not break.
+    # They are not used as extra triggers in this version.
+    # =========================================================
+    corridor_half_width: 1.0
+    min_x_consider: 0.0
+    max_x_consider: 20.0
+
+    enable_ttc: true
+    emergency_ttc: 0.6
+    hazard_ttc: 1.5
+    min_closing_speed: 0.10
+
+    enable_cut_in_prediction: true
+    hazard_prediction_horizon: 1.5
+    emergency_prediction_horizon: 0.5
+    min_lateral_speed: 0.10
+
     enable_brake_model: true
     ego_speed_mps: 1.3889
     max_decel_mps2: 1.5
     system_delay_sec: 0.30
-
     emergency_margin_m: 0.10
     hazard_margin_m: 0.25
 
-    # =========================================================
-    # RVIZ VISUALISATIE
-    # =========================================================
-    marker_topic: /safety_zones_array
-    marker_frame_id: velodyne
-
-    # Visuele hoogtecap.
-    # 3.0 m geeft genoeg ruimte om +15° omhoog te tonen.
-    zone_height: 3.0
-
-    # =========================================================
-    # Debug
-    # =========================================================
-    debug: true
-    debug_every_n_frames: 1
-    debug_timer: true
+    emergency_distance_hysteresis: 0.30
+    hazard_distance_hysteresis: 0.30
+    emergency_ttc_hysteresis: 0.20

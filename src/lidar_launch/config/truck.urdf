@@ -1,28 +1,53 @@
 <?xml version="1.0"?>
 <robot name="truck">
-  <!-- This is the truck body -->
+
+  <!-- Main truck frame -->
   <link name="base_link">
     <visual>
-      <origin xyz="0 0 0" rpy="0 0 1.5708"/> <!-- Adjust RPY if truck is sideways -->
+      <origin xyz="-2.5 0 0.9" rpy="0 0 0"/>
       <geometry>
-        <!-- Path to your STL -->
-        <mesh filename="package://lidar_launch/config/Truck_Model.stl" scale="2.5 2.5 2.5"/>
+        <box size="5.0 0.75 1.3"/>
       </geometry>
-      <material name="gray">
-        <color rgba="0.5 0.5 0.5 1.0"/>
+      <material name="truck_blue">
+        <color rgba="0.1 0.2 0.8 0.6"/>
       </material>
     </visual>
   </link>
 
-  <!-- This link matches your LiDAR frame -->
-  <link name="velodyne"/>
+  <!-- Safety coordinate frame:
+       x=0 front bumper
+       y=0 centerline
+       z=0 ground
+       
+       If your base_link is already at the front bumper, keep xyz="0 0 0".
+       If your base_link is at vehicle center, adjust this offset.
+  -->
+  <link name="safety_base"/>
 
-  <!-- Position the LiDAR on the truck (Adjust XYZ) -->
-  <joint name="truck_to_lidar" type="fixed">
+  <joint name="base_link_to_safety_base" type="fixed">
     <parent link="base_link"/>
-    <child link="velodyne"/>
-    <!-- Change Z to the height of your truck (e.g., 2.5 meters) -->
-    <!-- Change X if the lidar is at the front or back -->
-    <origin xyz="1.0 0.0 1.5" rpy="0 0 0"/> 
+    <child link="safety_base"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
   </joint>
+
+  <!-- Velodyne VLP-16 visual -->
+  <link name="velodyne">
+    <visual>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.052" length="0.072"/>
+      </geometry>
+      <material name="velodyne_black">
+        <color rgba="0.02 0.02 0.02 1.0"/>
+      </material>
+    </visual>
+  </link>
+
+  <!-- LiDAR position relative to safety_base/front-bumper frame -->
+  <joint name="safety_base_to_velodyne" type="fixed">
+    <parent link="safety_base"/>
+    <child link="velodyne"/>
+    <origin xyz="-0.57 0.0 1.8" rpy="0 0 0"/>
+  </joint>
+
 </robot>
