@@ -46,9 +46,25 @@ def generate_launch_description():
         ]
     )
 
+    control_node = Node(
+        package='lidar_object_detection',
+        executable='control_node',
+        name='control_node',
+        output='screen',
+        parameters=[{
+            'input_topic': '/safety_signal',
+            'output_topic': '/cmd_vel',
+            'speed_free_mps': 1.3889,
+            'speed_hazard_mps': 0.50,
+            'speed_emergency_mps': 0.0,
+            'max_accel_step_mps': 0.20,
+        }]
+    )
+
     return LaunchDescription([
         lidar_detector,
         object_tracker,
         ego_speed_node,
-        safety_supervisor
+        safety_supervisor,
+        control_node
     ])
