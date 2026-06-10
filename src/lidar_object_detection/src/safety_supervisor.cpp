@@ -390,7 +390,7 @@ private:
   {
     // x/y blijven in het LiDAR/rosbag-frame.
     // Dus sensor-origin blijft x=0, y=0.
-    x_d = static_cast<double>(t.x) + sensor_offset_x_;
+    x_d = static_cast<double>(t.x) +cd sensor_offset_x_;
     y_d = static_cast<double>(t.y) + sensor_offset_y_;
 
     // z wordt naar grondreferentie gebracht:
