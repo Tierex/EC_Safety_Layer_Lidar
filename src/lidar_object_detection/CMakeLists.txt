@@ -94,6 +94,13 @@ ament_target_dependencies(safety_monitor_node
   rclcpp
   std_msgs
 )
+add_executable(safety_performance_monitor src/safety_performance_monitor.cpp)
+ament_target_dependencies(safety_performance_monitor
+  rclcpp
+  std_msgs
+  sensor_msgs
+  geometry_msgs
+)
 
 # ========================
 # INSTALL EXECUTABLES
@@ -105,6 +112,7 @@ install(TARGETS
   lidar_detector
   object_tracker
   safety_supervisor
+  safety_performance_monitor
   ego_speed_constant_node
   ego_speed_from_odom_node
   ego_yaw_from_imu_node
