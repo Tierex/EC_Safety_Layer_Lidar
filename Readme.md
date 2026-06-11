@@ -32,7 +32,7 @@ All relevant launch files are located in the lidar_launch package
    ros2 launch lidar_launch lidar_safety_layer_launch.py
    ```
 ---
-This should oven up RVIZ2 and show the pointcloud data.
+This should open up RVIZ2 and show the pointcloud data.
 
 ## 3. Startup truck_gateway
 NOTE: A full readme description on how to start the gateway is available in the gateway package.
