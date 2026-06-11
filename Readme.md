@@ -32,18 +32,25 @@ All relevant launch files are located in the lidar_launch package
    ros2 launch lidar_launch lidar_safety_layer_launch.py
    ```
 ---
+This should oven up RVIZ2 and show the pointcloud data.
 
 ## 3. Startup truck_gateway
+NOTE: A full readme description on how to start the gateway is available in the gateway package.
+
 Open a seperate terminal and navigate to the ros2 workspace
-Run the launch file to start the `joy_node`, `xbox_translator`, and `truck_can_gateway`:
+Run the launch file to start the truck gateway taking into account the safety layer:
+```bash
+ros2 launch truck_gateway truck_safe_gateway_launch.py
+```
+Or alternatively the gateway can be launched without the safety layer implementation:
 ```bash
 ros2 launch truck_gateway truck_gateway_launch.py
 ```
-
 ---
 
 
-## 4. simulation (TEMP)
+## 4. simulation
+Simulating poincloud data coming in from the LiDAR.
 Open a rosbag;
 ```bash
 ros2 bag play -l bags/rosbag2_2026_04_23-19_14_47
