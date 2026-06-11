@@ -1,30 +1,43 @@
 // ============================================================================
 // safety_performance_monitor.cpp
 // ============================================================================
-// Monitoring node for comparing the custom ROS2 safety pipeline with another
-// software route such as Autoware.
+// Rosbag-aware performance monitor for the safety pipeline.
 //
 // Behaviour:
 // - Waits until an active "ros2 bag play ..." process is detected.
 // - Starts measuring only after a rosbag is detected.
-// - Automatically creates output files named after the rosbag.
+// - Automatically creates a CSV file named after the rosbag.
 // - Stops automatically when the rosbag process ends.
-// - Writes CSV output.
-// - Optional human-readable TXT output can be enabled with enable_txt_output.
-// - Does not use shell grep; it scans /proc directly, so no grep process is
-//   falsely detected.
+// - Uses steady_clock for CSV time_sec, so time_sec starts at 0.0.
+// - Uses ROS time for message-age calculations.
+// - Does not use shell grep; it scans /proc directly.
 //
-// Measures:
-// - Pointcloud topic frequency and message age
-// - Tracked object topic frequency and track count
-// - Detector/tracker processing time if available in stride 19
-// - Safety signal frequency, counts, transitions
-// - Raw and final command frequency
-// - Raw and final speed
-// - Override events
-// - Emergency-to-stop reaction time
-// - System CPU usage
-// - Monitor process RSS memory
+// CSV columns:
+// time_sec,
+// bag_name,
+// pc_hz,
+// pc_age_mean_ms,
+// tracked_hz,
+// tracked_last_seen_age_ms,
+// track_count,
+// detector_ms_mean,
+// tracker_ms_mean,
+// safety_hz,
+// current_signal,
+// count_emergency,
+// count_hazard,
+// count_free,
+// signal_transitions,
+// raw_cmd_hz,
+// final_cmd_hz,
+// raw_speed,
+// final_speed,
+// override_events,
+// reaction_mean_ms,
+// reaction_min_ms,
+// reaction_max_ms,
+// system_cpu_percent,
+// monitor_rss_mb
 // ============================================================================
 
 #include <algorithm>
@@ -32,7 +45,6 @@
 #include <cmath>
 #include <cctype>
 #include <cerrno>
-#include <cstdio>
 #include <cstdlib>
 #include <cstdint>
 #include <ctime>
@@ -92,11 +104,6 @@ public:
     max_ = -std::numeric_limits<double>::infinity();
   }
 
-  std::uint64_t count() const
-  {
-    return count_;
-  }
-
   double mean() const
   {
     if (count_ == 0) {
@@ -122,15 +129,6 @@ public:
     }
 
     return max_;
-  }
-
-  double stddev() const
-  {
-    if (count_ < 2) {
-      return nan();
-    }
-
-    return std::sqrt(m2_ / static_cast<double>(count_ - 1));
   }
 
 private:
@@ -196,7 +194,6 @@ public:
     RCLCPP_INFO(this->get_logger(), "safety_signal_topic:   %s", safety_signal_topic_.c_str());
     RCLCPP_INFO(this->get_logger(), "raw_cmd_topic:         %s", raw_cmd_topic_.c_str());
     RCLCPP_INFO(this->get_logger(), "final_cmd_topic:       %s", final_cmd_topic_.c_str());
-    RCLCPP_INFO(this->get_logger(), "summary_topic:         %s", summary_topic_.c_str());
     RCLCPP_INFO(this->get_logger(), "output_dir:            %s", output_dir_.c_str());
   }
 
@@ -206,9 +203,13 @@ public:
   }
 
 private:
-  // ==========================================================================
-  // Parameters
-  // ==========================================================================
+  struct RosbagProcessInfo
+  {
+    bool running = false;
+    std::string bag_path;
+    std::string bag_name;
+  };
+
   void declareParams()
   {
     this->declare_parameter<std::string>("pointcloud_topic", "/velodyne_points");
@@ -227,21 +228,11 @@ private:
 
     this->declare_parameter<std::string>("output_dir", "/home/school/performance_results");
 
-    // Number of monitor cycles after rosbag disappears before shutdown.
     this->declare_parameter<int>("bag_missing_cycles_before_stop", 3);
 
-    this->declare_parameter<bool>("debug", true);
-
-    // CSV is always written. TXT is optional.
-    this->declare_parameter<bool>("enable_txt_output", false);
-
-    // Live testing: false.
-    // Rosbag replay with --clock: true.
     this->declare_parameter<bool>("enable_sim_time", false);
 
-    // Only accept tracked age when source_time_sec appears to be in the same
-    // time domain as nowSec(). Set to 0.0 to disable this upper limit.
-    this->declare_parameter<double>("max_tracked_age_ms", 5000.0);
+    this->declare_parameter<bool>("debug", true);
   }
 
   void loadParams()
@@ -268,11 +259,8 @@ private:
     bag_missing_cycles_before_stop_ =
       this->get_parameter("bag_missing_cycles_before_stop").as_int();
 
-    debug_ = this->get_parameter("debug").as_bool();
-    enable_txt_output_ = this->get_parameter("enable_txt_output").as_bool();
     enable_sim_time_ = this->get_parameter("enable_sim_time").as_bool();
-
-    max_tracked_age_ms_ = this->get_parameter("max_tracked_age_ms").as_double();
+    debug_ = this->get_parameter("debug").as_bool();
 
     applySimTimeSetting();
 
@@ -290,17 +278,10 @@ private:
     if (bag_missing_cycles_before_stop_ < 1) {
       bag_missing_cycles_before_stop_ = 1;
     }
-
-    if (max_tracked_age_ms_ < 0.0) {
-      max_tracked_age_ms_ = 0.0;
-    }
   }
 
   void applySimTimeSetting()
   {
-    // ROS 2 uses the standard "use_sim_time" parameter to make this->now()
-    // follow /clock. This monitor exposes "enable_sim_time" because the
-    // workflow switches between live tests and rosbag replay.
     try {
       if (!this->has_parameter("use_sim_time")) {
         this->declare_parameter<bool>("use_sim_time", enable_sim_time_);
@@ -315,18 +296,6 @@ private:
         this->get_logger(),
         "Sim time mode: %s",
         enable_sim_time_ ? "enabled" : "disabled");
-    } catch (const rclcpp::exceptions::ParameterAlreadyDeclaredException &) {
-      try {
-        this->set_parameter(
-          rclcpp::Parameter(
-            "use_sim_time",
-            enable_sim_time_));
-      } catch (const std::exception & e) {
-        RCLCPP_WARN(
-          this->get_logger(),
-          "Could not set use_sim_time after declaration: %s",
-          e.what());
-      }
     } catch (const std::exception & e) {
       RCLCPP_WARN(
         this->get_logger(),
@@ -335,9 +304,6 @@ private:
     }
   }
 
-  // ==========================================================================
-  // General helpers
-  // ==========================================================================
   double nowSec() const
   {
     return this->now().seconds();
@@ -376,17 +342,20 @@ private:
     return 1000.0 / period_ms;
   }
 
-  bool isReasonableTrackedAgeMs(double age_ms) const
+  double trackedLastSeenAgeMs() const
   {
+    if (last_tracked_time_sec_ <= 0.0) {
+      return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    const double age_ms =
+      (nowSec() - last_tracked_time_sec_) * 1000.0;
+
     if (!std::isfinite(age_ms) || age_ms < 0.0) {
-      return false;
+      return std::numeric_limits<double>::quiet_NaN();
     }
 
-    if (max_tracked_age_ms_ <= 0.0) {
-      return true;
-    }
-
-    return age_ms <= max_tracked_age_ms_;
+    return age_ms;
   }
 
   std::string fmt(double v, int precision = 3) const
@@ -494,16 +463,6 @@ private:
 
     return path.substr(sep + 1);
   }
-
-  // ==========================================================================
-  // Rosbag process detection through /proc
-  // ==========================================================================
-  struct RosbagProcessInfo
-  {
-    bool running = false;
-    std::string bag_path;
-    std::string bag_name;
-  };
 
   std::vector<std::string> readProcessArguments(const std::string & pid) const
   {
@@ -750,9 +709,6 @@ private:
     return info;
   }
 
-  // ==========================================================================
-  // Output file handling
-  // ==========================================================================
   std::string buildOutputPath(
     const std::string & extension,
     const std::string & stop_time) const
@@ -791,6 +747,7 @@ private:
       bag.bag_name.empty() ? bag.bag_path : bag.bag_name);
 
     const auto now = std::chrono::system_clock::now();
+
     start_date_str_ = formatLocalTime(now, "%Y%m%d");
     start_time_str_ = formatLocalTime(now, "%H%M%S");
 
@@ -810,11 +767,6 @@ private:
     csv_running_path_ = buildOutputPath(".csv", "");
     csv_.open(csv_running_path_, std::ios::out);
 
-    if (enable_txt_output_) {
-      txt_running_path_ = buildOutputPath(".txt", "");
-      txt_.open(txt_running_path_, std::ios::out);
-    }
-
     if (!csv_.is_open()) {
       RCLCPP_ERROR(
         this->get_logger(),
@@ -823,26 +775,7 @@ private:
       return;
     }
 
-    if (enable_txt_output_ && !txt_.is_open()) {
-      RCLCPP_ERROR(
-        this->get_logger(),
-        "Could not open TXT output file: %s",
-        txt_running_path_.c_str());
-      return;
-    }
-
     writeCsvHeader();
-
-    if (enable_txt_output_ && txt_.is_open()) {
-      txt_ << "Safety performance monitor\n";
-      txt_ << "==========================\n";
-      txt_ << "rosbag_name: " << rosbag_base_name_ << "\n";
-      txt_ << "rosbag_path: " << bag.bag_path << "\n";
-      txt_ << "start_date: " << start_date_str_ << "\n";
-      txt_ << "start_time: " << start_time_str_ << "\n";
-      txt_ << "\n";
-      txt_.flush();
-    }
 
     monitoring_active_ = true;
     bag_currently_running_ = true;
@@ -857,29 +790,17 @@ private:
       this->get_logger(),
       "CSV output: %s",
       csv_running_path_.c_str());
-
-    if (enable_txt_output_ && txt_.is_open()) {
-      RCLCPP_INFO(
-        this->get_logger(),
-        "TXT output: %s",
-        txt_running_path_.c_str());
-    }
   }
 
   void finalizeOutputFiles()
   {
-    if (!monitoring_active_ && csv_running_path_.empty() && txt_running_path_.empty()) {
+    if (!monitoring_active_ && csv_running_path_.empty()) {
       return;
     }
 
     if (csv_.is_open()) {
       csv_.flush();
       csv_.close();
-    }
-
-    if (txt_.is_open()) {
-      txt_.flush();
-      txt_.close();
     }
 
     const std::string stop_time =
@@ -898,21 +819,7 @@ private:
       }
     }
 
-    if (enable_txt_output_ && !txt_running_path_.empty()) {
-      const std::string txt_final_path = buildOutputPath(".txt", stop_time);
-
-      if (std::rename(txt_running_path_.c_str(), txt_final_path.c_str()) == 0) {
-        RCLCPP_INFO(this->get_logger(), "Saved TXT: %s", txt_final_path.c_str());
-      } else {
-        RCLCPP_WARN(
-          this->get_logger(),
-          "Could not rename TXT file from %s",
-          txt_running_path_.c_str());
-      }
-    }
-
     csv_running_path_.clear();
-    txt_running_path_.clear();
     monitoring_active_ = false;
   }
 
@@ -922,7 +829,7 @@ private:
       << "time_sec,"
       << "bag_name,"
       << "pc_hz,pc_age_mean_ms,"
-      << "tracked_hz,tracked_age_mean_ms,track_count,"
+      << "tracked_hz,tracked_last_seen_age_ms,track_count,"
       << "detector_ms_mean,tracker_ms_mean,"
       << "safety_hz,current_signal,count_emergency,count_hazard,count_free,signal_transitions,"
       << "raw_cmd_hz,final_cmd_hz,raw_speed,final_speed,override_events,"
@@ -931,16 +838,12 @@ private:
       << "\n";
   }
 
-  // ==========================================================================
-  // Reset
-  // ==========================================================================
   void resetAllStats()
   {
     pointcloud_period_ms_.reset();
     pointcloud_age_ms_.reset();
 
     tracked_period_ms_.reset();
-    tracked_age_ms_.reset();
     detector_processing_ms_.reset();
     tracker_processing_ms_.reset();
 
@@ -987,9 +890,6 @@ private:
     last_cpu_total_ = 0;
   }
 
-  // ==========================================================================
-  // Topic callbacks
-  // ==========================================================================
   bool shouldAcceptMessages() const
   {
     return monitoring_active_ && bag_currently_running_;
@@ -1060,25 +960,11 @@ private:
     if (stride == 19 && n > 0) {
       const std::size_t k = 0;
 
-      const double source_time_sec =
-        static_cast<double>(msg->data[k + 16]);
-
       const double tracker_processing_ms =
         static_cast<double>(msg->data[k + 17]);
 
       const double detector_processing_ms =
         static_cast<double>(msg->data[k + 18]);
-
-      if (source_time_sec > 0.0) {
-        const double age_ms =
-          (nowSec() - source_time_sec) * 1000.0;
-
-        // Only accept tracked age if source_time_sec is in the same time domain.
-        // This prevents old rosbag / relative timestamps from creating huge values.
-        if (isReasonableTrackedAgeMs(age_ms)) {
-          tracked_age_ms_.add(age_ms);
-        }
-      }
 
       if (std::isfinite(tracker_processing_ms) &&
           tracker_processing_ms >= 0.0)
@@ -1196,9 +1082,6 @@ private:
     }
   }
 
-  // ==========================================================================
-  // CPU / memory
-  // ==========================================================================
   bool readProcStat(std::uint64_t & idle, std::uint64_t & total) const
   {
     std::ifstream file("/proc/stat");
@@ -1287,9 +1170,6 @@ private:
     return bytes / (1024.0 * 1024.0);
   }
 
-  // ==========================================================================
-  // Summary / output
-  // ==========================================================================
   void writeCsvRow(
     double pc_hz,
     double tracked_hz,
@@ -1309,7 +1189,7 @@ private:
       << fmt(pc_hz) << ","
       << fmt(pointcloud_age_ms_.mean()) << ","
       << fmt(tracked_hz) << ","
-      << fmt(tracked_age_ms_.mean()) << ","
+      << fmt(trackedLastSeenAgeMs()) << ","
       << current_track_count_ << ","
       << fmt(detector_processing_ms_.mean()) << ","
       << fmt(tracker_processing_ms_.mean()) << ","
@@ -1334,51 +1214,6 @@ private:
     csv_.flush();
   }
 
-  void writeTxtSummary(
-    double pc_hz,
-    double tracked_hz,
-    double safety_hz,
-    double raw_cmd_hz,
-    double final_cmd_hz,
-    double system_cpu_percent,
-    double own_rss_mb)
-  {
-    if (!txt_.is_open()) {
-      return;
-    }
-
-    const std::string timestamp =
-      formatLocalTime(std::chrono::system_clock::now(), "%H:%M:%S");
-
-    txt_ << "time: " << timestamp << "\n";
-    txt_ << "pointcloud_hz: " << fmt(pc_hz) << "\n";
-    txt_ << "pointcloud_age_mean_ms: " << fmt(pointcloud_age_ms_.mean()) << "\n";
-    txt_ << "tracked_hz: " << fmt(tracked_hz) << "\n";
-    txt_ << "tracked_age_mean_ms: " << fmt(tracked_age_ms_.mean()) << "\n";
-    txt_ << "track_count: " << current_track_count_ << "\n";
-    txt_ << "detector_processing_mean_ms: " << fmt(detector_processing_ms_.mean()) << "\n";
-    txt_ << "tracker_processing_mean_ms: " << fmt(tracker_processing_ms_.mean()) << "\n";
-    txt_ << "safety_hz: " << fmt(safety_hz) << "\n";
-    txt_ << "current_signal: " << current_signal_ << "\n";
-    txt_ << "count_emergency: " << count_emergency_ << "\n";
-    txt_ << "count_hazard: " << count_hazard_ << "\n";
-    txt_ << "count_free: " << count_free_ << "\n";
-    txt_ << "signal_transitions: " << signal_transitions_ << "\n";
-    txt_ << "raw_cmd_hz: " << fmt(raw_cmd_hz) << "\n";
-    txt_ << "final_cmd_hz: " << fmt(final_cmd_hz) << "\n";
-    txt_ << "raw_speed_mps: " << fmt(raw_speed_mps_) << "\n";
-    txt_ << "final_speed_mps: " << fmt(final_speed_mps_) << "\n";
-    txt_ << "override_events: " << override_events_ << "\n";
-    txt_ << "reaction_mean_ms: " << fmt(reaction_time_ms_.mean()) << "\n";
-    txt_ << "reaction_min_ms: " << fmt(reaction_time_ms_.min()) << "\n";
-    txt_ << "reaction_max_ms: " << fmt(reaction_time_ms_.max()) << "\n";
-    txt_ << "system_cpu_percent: " << fmt(system_cpu_percent) << "\n";
-    txt_ << "monitor_rss_mb: " << fmt(own_rss_mb) << "\n";
-    txt_ << "----------------------\n";
-
-    txt_.flush();
-  }
-
   void publishSummary(
     double pc_hz,
     double tracked_hz,
@@ -1395,7 +1230,10 @@ private:
       << "time_sec: " << fmt(elapsedMonitorTimeSec()) << "\n"
       << "pointcloud_hz: " << fmt(pc_hz) << "\n"
       << "tracked_hz: " << fmt(tracked_hz) << "\n"
+      << "tracked_last_seen_age_ms: " << fmt(trackedLastSeenAgeMs()) << "\n"
       << "track_count: " << current_track_count_ << "\n"
+      << "detector_processing_mean_ms: " << fmt(detector_processing_ms_.mean()) << "\n"
+      << "tracker_processing_mean_ms: " << fmt(tracker_processing_ms_.mean()) << "\n"
       << "safety_hz: " << fmt(safety_hz) << "\n"
       << "current_signal: " << current_signal_ << "\n"
       << "count_emergency: " << count_emergency_ << "\n"
@@ -1411,9 +1249,6 @@ private:
     summary_pub_->publish(out);
   }
 
-  // ==========================================================================
-  // Timer
-  // ==========================================================================
   void timerCallback()
   {
     const RosbagProcessInfo bag = findActiveRosbagProcess();
@@ -1488,37 +1323,26 @@ private:
       system_cpu_percent,
       own_rss_mb);
 
-    if (enable_txt_output_) {
-      writeTxtSummary(
-        pc_hz,
-        tracked_hz,
-        safety_hz,
-        raw_cmd_hz,
-        final_cmd_hz,
-        system_cpu_percent,
-        own_rss_mb);
-    }
-
     if (debug_) {
       RCLCPP_INFO(
         this->get_logger(),
-        "bag=%s time=%s pc_hz=%s tracked_hz=%s safety_hz=%s signal=%d tracks=%d reaction_mean_ms=%s cpu=%s rss=%s",
+        "bag=%s time=%s pc_hz=%s tracked_hz=%s tracked_last_seen_age_ms=%s safety_hz=%s signal=%d tracks=%d detector_ms=%s tracker_ms=%s cpu=%s rss=%s",
         rosbag_base_name_.c_str(),
         fmt(elapsedMonitorTimeSec()).c_str(),
         fmt(pc_hz).c_str(),
         fmt(tracked_hz).c_str(),
+        fmt(trackedLastSeenAgeMs()).c_str(),
         fmt(safety_hz).c_str(),
         current_signal_,
         current_track_count_,
-        fmt(reaction_time_ms_.mean()).c_str(),
+        fmt(detector_processing_ms_.mean()).c_str(),
+        fmt(tracker_processing_ms_.mean()).c_str(),
         fmt(system_cpu_percent).c_str(),
         fmt(own_rss_mb).c_str());
     }
   }
 
-  // ==========================================================================
-  // Parameters
-  // ==========================================================================
+private:
   std::string pointcloud_topic_;
   std::string tracked_objects_topic_;
   std::string safety_signal_topic_;
@@ -1530,13 +1354,12 @@ private:
   double summary_period_sec_ = 1.0;
   double stop_speed_threshold_mps_ = 0.03;
   double override_speed_epsilon_mps_ = 0.05;
-  double max_tracked_age_ms_ = 5000.0;
 
   int bag_missing_cycles_before_stop_ = 3;
 
-  // ==========================================================================
-  // Rosbag/output state
-  // ==========================================================================
+  bool enable_sim_time_ = false;
+  bool debug_ = true;
+
   bool monitoring_active_ = false;
   bool bag_currently_running_ = false;
   int missing_bag_cycles_ = 0;
@@ -1549,14 +1372,8 @@ private:
   bool monitor_start_wall_time_set_ = false;
 
   std::string csv_running_path_;
-  std::string txt_running_path_;
-
   std::ofstream csv_;
-  std::ofstream txt_;
 
-  // ==========================================================================
-  // ROS
-  // ==========================================================================
   rclcpp::Subscription<sensor_msgs::msg::PointCloud2>::SharedPtr pointcloud_sub_;
   rclcpp::Subscription<std_msgs::msg::Float32MultiArray>::SharedPtr tracked_sub_;
   rclcpp::Subscription<std_msgs::msg::Int16>::SharedPtr safety_sub_;
@@ -1566,9 +1383,6 @@ private:
   rclcpp::Publisher<std_msgs::msg::String>::SharedPtr summary_pub_;
   rclcpp::TimerBase::SharedPtr timer_;
 
-  // ==========================================================================
-  // Timing stats
-  // ==========================================================================
   double last_pointcloud_time_sec_ = -1.0;
   double last_tracked_time_sec_ = -1.0;
   double last_safety_time_sec_ = -1.0;
@@ -1579,7 +1393,6 @@ private:
   RunningStats pointcloud_age_ms_;
 
   RunningStats tracked_period_ms_;
-  RunningStats tracked_age_ms_;
   RunningStats detector_processing_ms_;
   RunningStats tracker_processing_ms_;
 
@@ -1589,9 +1402,6 @@ private:
 
   RunningStats reaction_time_ms_;
 
-  // ==========================================================================
-  // Counters/state
-  // ==========================================================================
   std::uint64_t pointcloud_count_total_ = 0;
   std::uint64_t tracked_count_total_ = 0;
   std::uint64_t safety_count_total_ = 0;
@@ -1618,19 +1428,9 @@ private:
   bool waiting_for_stop_after_emergency_ = false;
   double emergency_request_time_sec_ = -1.0;
 
-  // ==========================================================================
-  // CPU
-  // ==========================================================================
   bool have_cpu_sample_ = false;
   std::uint64_t last_cpu_idle_ = 0;
   std::uint64_t last_cpu_total_ = 0;
-
-  // ==========================================================================
-  // Debug / modes
-  // ==========================================================================
-  bool debug_ = true;
-  bool enable_txt_output_ = false;
-  bool enable_sim_time_ = false;
 };
 
 int main(int argc, char ** argv)
