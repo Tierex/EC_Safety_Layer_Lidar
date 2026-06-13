@@ -149,6 +149,10 @@ ego_yaw_from_imu_node
 safety_monitor_node
 ```
 
+### Optional performance monitoring
+
+`SafetyPerformanceMonitor` is not included in the default launch pipelines, but can be started manually to record performance metrics and generate CSV output while a rosbag is played.
+
 ### Optional debug subscriber
 
 ```text
@@ -309,3 +313,21 @@ Notes:
 Notes:
 
 - Prints runtime summaries of safety status, ego speed, track count, minimum distance, and TTC.
+
+### 4.9 `safety_performance_monitor`
+
+- Executable: not included in default launch files
+- Source file: `safety_performance_monitor.cpp`
+- Inputs:
+  - `/velodyne_points` (`sensor_msgs/PointCloud2`)
+  - `/tracked_objects` (`std_msgs/Float32MultiArray`)
+  - `/safety_signal` (`std_msgs/Int16`)
+  - `/cmd_vel_raw` (`geometry_msgs/Twist`)
+  - `/cmd_vel` (`geometry_msgs/Twist`)
+
+Notes:
+
+- Detects a running `ros2 bag play` process and starts monitoring only while a bag is active
+- Writes CSV output automatically to the configured output directory
+- Measures point cloud rate, tracked object rate, safety signal counts, command rates, reaction latency, and system resource usage
+- Useful for offline test validation and performance logging
