@@ -1,7 +1,7 @@
 import os
-from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, LogInfo
+from launch.actions import IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import Node
 
@@ -9,16 +9,13 @@ def generate_launch_description():
     pkg_share = get_package_share_directory('lidar_launch')
 
     #Velodyne
-    velodyne_action = None
-    try:
-        velodyne_launch_dir = os.path.join(get_package_share_directory('velodyne'), 'launch')
-        velodyne_action = IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(
-                os.path.join(velodyne_launch_dir, 'velodyne-all-nodes-VLP16-launch.py')
-            )
+    velodyne_launch_dir = os.path.join(get_package_share_directory('velodyne'), 'launch')
+    
+    velodyne_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(
+            os.path.join(velodyne_launch_dir, 'velodyne-all-nodes-VLP16-launch.py')
         )
-    except PackageNotFoundError:
-        velodyne_action = LogInfo(msg='velodyne package not found; skipping velodyne launch.')
+    )
 
     #URDF (truck model)
     urdf_file = os.path.join(pkg_share, 'config', 'truck.urdf')
@@ -33,7 +30,6 @@ def generate_launch_description():
         parameters=[{'robot_description': truck_desc}],
     )
 
-
     #RVIZ
     rviz_config_dir = os.path.join(pkg_share,'config', 'velodyne_default_V2.rviz')
 
@@ -46,7 +42,7 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        velodyne_action,
+        velodyne_launch,
         truck_description_publisher,
         rviz_node
     ])

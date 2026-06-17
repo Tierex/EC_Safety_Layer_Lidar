@@ -848,7 +848,7 @@ private:
     bg.color.r = 0.0f;
     bg.color.g = 0.0f;
     bg.color.b = 0.0f;
-    bg.color.a = 0.8f;
+    bg.color.a = 0.0f;
 
     status_marker_pub_->publish(bg);
 
