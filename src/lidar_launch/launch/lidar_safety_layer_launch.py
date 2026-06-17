@@ -121,7 +121,7 @@ def generate_launch_description():
     rviz_config_file = os.path.join(
         pkg_dir,
         'config',
-        'velodyne_default_V4.rviz'
+        'velodyne_default_V5.rviz'
     )
 
     rviz_node = Node(
