@@ -439,6 +439,197 @@ This offset allows the supervisor to evaluate safety distances relative to the f
 | `hazard_hold_sec` | Minimum hazard hold time |
 | `lidar_down_angle_deg`, `lidar_up_angle_deg` | Vertical visibility angles for the VLP-16 model |
 
+
+## YAML configuration
+
+The package contains the following configuration file:
+
+```text
+src/lidar_object_detection/config/lidar_pipeline_tuning.yaml
+```
+
+In the current repository this YAML file mainly configures the `safety_supervisor` node. The detector and tracker parameters are declared in their C++ nodes and can also be overridden from a launch file if needed. The full launch file currently passes several parameters inline, so make sure that the launch file and this YAML file use the same values when tuning the system.
+
+Current YAML configuration:
+
+```yaml
+safety_supervisor:
+  ros__parameters:
+
+    # =========================================================
+    # Topics
+    # =========================================================
+    input_topic: /tracked_objects
+    output_topic: /safety_signal
+    ego_speed_topic: /ego_speed
+
+    # =========================================================
+    # QoS / timing
+    # =========================================================
+    qos_depth: 20
+    publish_rate_hz: 20.0
+
+    # =========================================================
+    # Fail-safe
+    # =========================================================
+    stale_timeout_sec: 0.5
+    stale_signal: 0
+    ego_speed_stale_timeout_sec: 1.0
+
+    # =========================================================
+    # Sensor offset: LiDAR t.o.v. safety_base
+    # safety_base: x=0 voorkant truck, y=0 middenlijn, z=0 grond
+    # =========================================================
+    sensor_offset_x: -0.57
+    sensor_offset_y: 0.0
+    sensor_offset_z: 1.8
+
+    # =========================================================
+    # Front/cab zones
+    # Emergency: 0.0 -> 1.5 m
+    # Hazard:    1.5 -> 2.5 m
+    # =========================================================
+    emergency_distance: 1.5
+    hazard_distance: 2.5
+
+    # =========================================================
+    # Side/trailer zones
+    # Side-zone hysteresis. Side zones are HAZARD only, never emergency
+    side_zone_hysteresis_x: 0.20
+    side_zone_hysteresis_y: 0.10
+    min_side_approach_speed: 0.10
+
+    # =========================================================
+    # Debug
+    # =========================================================
+    debug: true
+    debug_every_n_frames: 1
+    debug_timer: true
+    # =========================================================
+    enable_side_zones: true
+    side_zone_length: 6.0
+    side_zone_width: 0.6
+    side_zone_offset_y: 0.5
+
+    # =========================================================
+    # Track filtering
+    # =========================================================
+    min_track_hits: 1
+    max_track_misses: 2
+
+    # =========================================================
+    # Hold times
+    # =========================================================
+    emergency_hold_sec: 0.30
+    hazard_hold_sec: 0.50
+
+    # =========================================================
+    # VLP-16 vertical FOV
+    # =========================================================
+    zone_height: 3.0
+    lidar_down_angle_deg: 15.0
+    lidar_up_angle_deg: 15.0
+
+    # =========================================================
+    # RViz markers
+    # =========================================================
+    marker_topic: /safety_zones_array
+    marker_frame_id: safety_base
+    sector_azimuth_steps: 120
+
+    # =========================================================
+    # Compatibility parameters
+    # These remain here so older launch/config does not break.
+    # They are not used as extra triggers in this version.
+    # =========================================================
+    corridor_half_width: 1.0
+    min_x_consider: 0.0
+    max_x_consider: 20.0
+
+    enable_ttc: true
+    emergency_ttc: 0.6
+    hazard_ttc: 1.5
+    min_closing_speed: 0.10
+
+    enable_cut_in_prediction: true
+    hazard_prediction_horizon: 1.5
+    emergency_prediction_horizon: 0.5
+    min_lateral_speed: 0.10
+
+    enable_brake_model: true
+    ego_speed_mps: 1.3889
+    max_decel_mps2: 1.5
+    system_delay_sec: 0.30
+    emergency_margin_m: 0.10
+    hazard_margin_m: 0.25
+
+    emergency_distance_hysteresis: 0.30
+    hazard_distance_hysteresis: 0.30
+    emergency_ttc_hysteresis: 0.20
+```
+
+### Parameter choices and tuning rationale
+
+The parameters were chosen for low-speed testing of the 1:3 scaled truck with a roof-mounted Velodyne VLP-16. The main goal was to obtain stable pedestrian/obstacle detection and a conservative safety signal, rather than maximum object-classification accuracy.
+
+#### Detector tuning choices
+
+| Parameter | Current value | Reason for this choice | Effect if changed |
+|---|---:|---|---|
+| `roi_x_min` / `roi_x_max` | -4.0 / 4.0 m | Limits processing to the relevant area around the truck | A larger ROI increases processing load; a smaller ROI may remove relevant obstacles |
+| `roi_y_min` / `roi_y_max` | -3.0 / 3.0 m | Covers the area in front and beside the truck during low-speed tests | Too narrow may miss side objects; too wide may include irrelevant objects |
+| `roi_z_min` / `roi_z_max` | -3.0 / 3.0 m | Keeps enough vertical range for ground and pedestrian points | Too narrow may remove useful points before clustering |
+| `voxel_size` | 0.05 m | Reduces point count while preserving pedestrian shape | Larger is faster but less detailed; smaller is more detailed but slower |
+| `use_ground_removal` | true | Prevents ground points from becoming obstacle clusters | Disabling it can create false clusters from the floor |
+| `ground_max_distance` | 0.10 m | Allows points close to the fitted plane to be removed as ground | Too high may remove low obstacle points; too low may leave ground points |
+| `ground_max_angle_deg` | 15.0 deg | Keeps the ground plane close to the expected floor orientation | Higher values allow tilted planes; lower values are stricter |
+| `cluster_tolerance` | 0.25 m | Groups nearby LiDAR points into one object candidate | Too small splits one person; too large merges nearby objects |
+| `min_cluster_size` / `max_cluster_size` | 8 / 2000 points | Removes noise clusters and unrealistically large clusters | Lower minimum increases noise; lower maximum may remove large objects |
+| `min_z_size` / `max_z_size` | 0.30 / 2.00 m | Accepts pedestrian-sized vertical objects | Too strict may reject valid people; too loose accepts more false objects |
+
+#### Tracker tuning choices
+
+| Parameter | Current value | Reason for this choice | Effect if changed |
+|---|---:|---|---|
+| `max_match_distance` | 1.0 m | Allows detections to be associated between frames at low LiDAR frequency | Smaller is stricter but may lose tracks; larger may cause wrong matches |
+| `max_z_match_distance` | 1.0 m | Allows vertical variation in sparse VLP-16 detections | Smaller may lose tracks due to height variation |
+| `max_size_change_ratio` | 2.5 | Prevents very different clusters from being matched to the same track | Lower is stricter; higher can associate unrelated objects |
+| `max_missed_frames` | 5 | Keeps a track alive during short missed detections | Higher improves continuity but may keep stale tracks too long |
+| `min_hits_to_publish` | 1 | Publishes tracks quickly for reactive safety behaviour | Higher reduces noise but delays first detection |
+| `velocity_alpha` | 0.35 | Smooths velocity without making response too slow | Higher responds faster but noisier; lower is smoother but slower |
+| `predict_missed_tracks` | true | Predicts object position when one frame is missed | Helps continuity but can drift if detections disappear for too long |
+
+#### Safety-supervisor tuning choices
+
+| Parameter | Current value | Reason for this choice | Effect if changed |
+|---|---:|---|---|
+| `publish_rate_hz` | 20.0 Hz | Provides a stable control-relevant safety output | Higher rate gives faster repeated output but more CPU load |
+| `stale_timeout_sec` | 0.5 s | Treats missing tracked-object data as unsafe after a short timeout | Shorter reacts faster to data loss; longer avoids false emergency on small gaps |
+| `stale_signal` | 0 | Fail-safe behaviour: stale perception data results in emergency | Setting this to 2 would be unsafe for safety-critical tests |
+| `sensor_offset_x` | -0.57 m | LiDAR is approximately 0.57 m behind the front bumper | Wrong value shifts all safety distances |
+| `sensor_offset_z` | 1.8 m | LiDAR height above the ground | Used by the VLP-16 visibility model |
+| `emergency_distance` | 1.5 m | Defines the front emergency region | Larger is more conservative; smaller allows closer approach |
+| `hazard_distance` | 2.5 m | Defines the front hazard region | Larger gives earlier warning/restriction |
+| `enable_side_zones` | true | Enables hazard zones beside the truck/trailer area | Useful for near-side awareness, but not an emergency trigger |
+| `side_zone_length` | 6.0 m | Covers the side area of the truck/trailer setup | Should match the vehicle geometry used in testing |
+| `side_zone_width` | 0.6 m | Defines the lateral width of each side hazard zone | Wider detects more side objects but may trigger more hazards |
+| `side_zone_offset_y` | 0.5 m | Places the side zones away from the vehicle centreline | Should be tuned to truck width and RViz alignment |
+| `min_track_hits` | 1 | Allows immediate safety reaction to a new valid track | Higher values reduce false positives but delay reaction |
+| `max_track_misses` | 2 | Rejects tracks that have recently disappeared | Higher values are more tolerant but can keep stale objects |
+| `emergency_hold_sec` | 0.30 s | Prevents emergency signal from flickering | Longer holds are more stable but return to free more slowly |
+| `hazard_hold_sec` | 0.50 s | Prevents hazard signal from flickering | Longer holds reduce switching near zone boundaries |
+| `lidar_down_angle_deg` / `lidar_up_angle_deg` | 15.0 / 15.0 deg | Approximates the vertical visibility of the VLP-16 | Used to model near-field visibility limitations |
+
+### Recommended tuning workflow
+
+1. Start with RViz2 and verify that `/velodyne_points` is correctly aligned with the LiDAR frame.
+2. Tune the ROI so only the relevant area around the truck is processed.
+3. Tune `voxel_size`, `ground_max_distance` and `cluster_tolerance` until pedestrians form stable clusters.
+4. Tune tracker parameters only after detection is stable.
+5. Tune safety-zone distances and side-zone dimensions using the RViz2 safety-zone markers.
+6. Verify that `/safety_signal` changes correctly for known object positions.
+7. Test stale-data behaviour by stopping `/tracked_objects` and checking that the supervisor publishes the configured fail-safe signal.
+
 ## Fail-safe behaviour
 
 The safety supervisor contains stale-data handling. If no recent `/tracked_objects` data is received within the configured timeout, it publishes the configured stale signal. For safety testing this is normally:
