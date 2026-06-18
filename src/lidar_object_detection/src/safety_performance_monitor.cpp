@@ -885,9 +885,8 @@ private:
     last_raw_cmd_time_sec_ = -1.0;
     last_final_cmd_time_sec_ = -1.0;
 
-    have_pointcloud_time_reference_ = false;
-    first_pointcloud_ros_time_sec_ = 0.0;
-    first_pointcloud_msg_stamp_sec_ = 0.0;
+    have_pointcloud_offset_reference_ = false;
+    min_pointcloud_offset_ms_ = 0.0;
 
     pointcloud_count_total_ = 0;
     tracked_count_total_ = 0;
@@ -950,30 +949,30 @@ private:
     const double stamp_sec = stamp.seconds();
 
     if (stamp.nanoseconds() > 0 && now_ros_sec > 0.0 && stamp_sec > 0.0) {
-      if (!have_pointcloud_time_reference_) {
-        first_pointcloud_ros_time_sec_ = now_ros_sec;
-        first_pointcloud_msg_stamp_sec_ = stamp_sec;
-        have_pointcloud_time_reference_ = true;
+      const double current_offset_ms =
+        (now_ros_sec - stamp_sec) * 1000.0;
+
+      if (!have_pointcloud_offset_reference_) {
+        min_pointcloud_offset_ms_ = current_offset_ms;
+        have_pointcloud_offset_reference_ = true;
 
         RCLCPP_INFO(
           this->get_logger(),
-          "PointCloud time reference initialized | ros_time=%.6f | msg_stamp=%.6f | initial_offset_ms=%.3f",
-          first_pointcloud_ros_time_sec_,
-          first_pointcloud_msg_stamp_sec_,
-          (first_pointcloud_ros_time_sec_ - first_pointcloud_msg_stamp_sec_) * 1000.0);
+          "PointCloud offset reference initialized | ros_time=%.6f | msg_stamp=%.6f | offset_ms=%.3f",
+          now_ros_sec,
+          stamp_sec,
+          min_pointcloud_offset_ms_);
       }
 
-      const double ros_elapsed_sec =
-        now_ros_sec - first_pointcloud_ros_time_sec_;
+      if (current_offset_ms < min_pointcloud_offset_ms_) {
+        min_pointcloud_offset_ms_ = current_offset_ms;
+      }
 
-      const double msg_elapsed_sec =
-        stamp_sec - first_pointcloud_msg_stamp_sec_;
+      const double offset_corrected_age_ms =
+        current_offset_ms - min_pointcloud_offset_ms_;
 
-      const double relative_age_ms =
-        (ros_elapsed_sec - msg_elapsed_sec) * 1000.0;
-
-      if (std::isfinite(relative_age_ms)) {
-        pointcloud_age_ms_.add(relative_age_ms);
+      if (std::isfinite(offset_corrected_age_ms)) {
+        pointcloud_age_ms_.add(offset_corrected_age_ms);
       }
     }
   }
@@ -1246,10 +1245,6 @@ private:
       fields.push_back(field);
     }
 
-    // /proc/<pid>/stat:
-    // field 14 = utime, field 15 = stime.
-    // After removing "pid (comm)", parsing starts at field 3.
-    // Therefore: utime -> index 11, stime -> index 12.
     if (fields.size() <= 12) {
       return false;
     }
@@ -1501,7 +1496,7 @@ private:
       << "rosbag_name: " << rosbag_base_name_ << "\n"
       << "time_sec: " << fmt(elapsedMonitorTimeSec()) << "\n"
       << "pointcloud_hz: " << fmt(pc_hz) << "\n"
-      << "pointcloud_age_mean_ms_relative: " << fmt(pointcloud_age_ms_.mean()) << "\n"
+      << "pointcloud_age_mean_ms_offset_corrected: " << fmt(pointcloud_age_ms_.mean()) << "\n"
       << "tracked_hz: " << fmt(tracked_hz) << "\n"
       << "tracked_last_seen_age_ms: " << fmt(trackedLastSeenAgeMs()) << "\n"
       << "track_count: " << current_track_count_ << "\n"
@@ -1603,7 +1598,7 @@ private:
     if (debug_) {
       RCLCPP_INFO(
         this->get_logger(),
-        "bag=%s time=%s pc_hz=%s pc_age_rel_ms=%s tracked_hz=%s tracked_last_seen_age_ms=%s safety_hz=%s signal=%d tracks=%d detector_ms=%s tracker_ms=%s system_cpu=%s pipeline_cpu=%s rss=%s",
+        "bag=%s time=%s pc_hz=%s pc_age_offset_ms=%s tracked_hz=%s tracked_last_seen_age_ms=%s safety_hz=%s signal=%d tracks=%d detector_ms=%s tracker_ms=%s system_cpu=%s pipeline_cpu=%s rss=%s",
         rosbag_base_name_.c_str(),
         fmt(elapsedMonitorTimeSec()).c_str(),
         fmt(pc_hz).c_str(),
@@ -1669,9 +1664,8 @@ private:
   double last_raw_cmd_time_sec_ = -1.0;
   double last_final_cmd_time_sec_ = -1.0;
 
-  bool have_pointcloud_time_reference_ = false;
-  double first_pointcloud_ros_time_sec_ = 0.0;
-  double first_pointcloud_msg_stamp_sec_ = 0.0;
+  bool have_pointcloud_offset_reference_ = false;
+  double min_pointcloud_offset_ms_ = 0.0;
 
   RunningStats pointcloud_period_ms_;
   RunningStats pointcloud_age_ms_;
