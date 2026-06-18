@@ -53,6 +53,7 @@
 #include <fstream>
 #include <iomanip>
 #include <limits>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <string>
@@ -144,6 +145,11 @@ private:
   double max_ = -std::numeric_limits<double>::infinity();
 };
 
+struct ProcCpuSample
+{
+  long long total_ticks = 0;
+};
+
 class SafetyPerformanceMonitor : public rclcpp::Node
 {
 public:
@@ -195,6 +201,15 @@ public:
     RCLCPP_INFO(this->get_logger(), "raw_cmd_topic:         %s", raw_cmd_topic_.c_str());
     RCLCPP_INFO(this->get_logger(), "final_cmd_topic:       %s", final_cmd_topic_.c_str());
     RCLCPP_INFO(this->get_logger(), "output_dir:            %s", output_dir_.c_str());
+
+    std::ostringstream proc_names;
+    for (std::size_t i = 0; i < pipeline_process_names_.size(); ++i) {
+      if (i > 0) {
+        proc_names << ", ";
+      }
+      proc_names << pipeline_process_names_[i];
+    }
+    RCLCPP_INFO(this->get_logger(), "pipeline_process_names: %s", proc_names.str().c_str());
   }
 
   ~SafetyPerformanceMonitor() override
@@ -233,6 +248,15 @@ private:
     this->declare_parameter<bool>("enable_sim_time", false);
 
     this->declare_parameter<bool>("debug", true);
+    this->declare_parameter<std::vector<std::string>>(
+      "pipeline_process_names",
+      std::vector<std::string>{
+        "lidar_detector",
+        "object_tracker",
+        "ego_speed_constant_node",
+        "safety_supervisor",
+        "control_node"
+      });
   }
 
   void loadParams()
@@ -261,6 +285,8 @@ private:
 
     enable_sim_time_ = this->get_parameter("enable_sim_time").as_bool();
     debug_ = this->get_parameter("debug").as_bool();
+    pipeline_process_names_ =
+      this->get_parameter("pipeline_process_names").as_string_array();
 
     applySimTimeSetting();
 
@@ -834,7 +860,7 @@ private:
       << "safety_hz,current_signal,count_emergency,count_hazard,count_free,signal_transitions,"
       << "raw_cmd_hz,final_cmd_hz,raw_speed,final_speed,override_events,"
       << "reaction_mean_ms,reaction_min_ms,reaction_max_ms,"
-      << "system_cpu_percent,monitor_rss_mb"
+      << "system_cpu_percent,pipeline_cpu_percent,monitor_rss_mb"
       << "\n";
   }
 
@@ -858,6 +884,10 @@ private:
     last_safety_time_sec_ = -1.0;
     last_raw_cmd_time_sec_ = -1.0;
     last_final_cmd_time_sec_ = -1.0;
+
+    have_pointcloud_time_reference_ = false;
+    first_pointcloud_ros_time_sec_ = 0.0;
+    first_pointcloud_msg_stamp_sec_ = 0.0;
 
     pointcloud_count_total_ = 0;
     tracked_count_total_ = 0;
@@ -888,6 +918,11 @@ private:
     have_cpu_sample_ = false;
     last_cpu_idle_ = 0;
     last_cpu_total_ = 0;
+
+    have_pipeline_cpu_sample_ = false;
+    last_pipeline_proc_samples_.clear();
+    last_pipeline_cpu_wall_time_ = std::chrono::steady_clock::time_point{};
+    last_pipeline_cpu_percent_ = std::numeric_limits<double>::quiet_NaN();
   }
 
   bool shouldAcceptMessages() const
@@ -911,12 +946,35 @@ private:
     pointcloud_count_total_++;
 
     const rclcpp::Time stamp(msg->header.stamp);
+    const double now_ros_sec = this->now().seconds();
+    const double stamp_sec = stamp.seconds();
 
-    if (stamp.nanoseconds() > 0) {
-      const double age_ms =
-        (this->now() - stamp).seconds() * 1000.0;
+    if (stamp.nanoseconds() > 0 && now_ros_sec > 0.0 && stamp_sec > 0.0) {
+      if (!have_pointcloud_time_reference_) {
+        first_pointcloud_ros_time_sec_ = now_ros_sec;
+        first_pointcloud_msg_stamp_sec_ = stamp_sec;
+        have_pointcloud_time_reference_ = true;
 
-      pointcloud_age_ms_.add(age_ms);
+        RCLCPP_INFO(
+          this->get_logger(),
+          "PointCloud time reference initialized | ros_time=%.6f | msg_stamp=%.6f | initial_offset_ms=%.3f",
+          first_pointcloud_ros_time_sec_,
+          first_pointcloud_msg_stamp_sec_,
+          (first_pointcloud_ros_time_sec_ - first_pointcloud_msg_stamp_sec_) * 1000.0);
+      }
+
+      const double ros_elapsed_sec =
+        now_ros_sec - first_pointcloud_ros_time_sec_;
+
+      const double msg_elapsed_sec =
+        stamp_sec - first_pointcloud_msg_stamp_sec_;
+
+      const double relative_age_ms =
+        (ros_elapsed_sec - msg_elapsed_sec) * 1000.0;
+
+      if (std::isfinite(relative_age_ms)) {
+        pointcloud_age_ms_.add(relative_age_ms);
+      }
     }
   }
 
@@ -1144,6 +1202,217 @@ private:
     return 100.0 * busy_delta / static_cast<double>(total_delta);
   }
 
+  std::string readProcessName(const std::string & pid) const
+  {
+    std::string path = "/proc/" + pid + "/comm";
+    std::ifstream file(path);
+
+    if (!file.is_open()) {
+      return std::string();
+    }
+
+    std::string name;
+    std::getline(file, name);
+    return name;
+  }
+
+  bool readProcPidStat(int pid, long long & total_ticks) const
+  {
+    const std::string path = "/proc/" + std::to_string(pid) + "/stat";
+    std::ifstream file(path);
+
+    if (!file.is_open()) {
+      return false;
+    }
+
+    std::string line;
+    std::getline(file, line);
+
+    if (line.empty()) {
+      return false;
+    }
+
+    const auto rparen = line.rfind(')');
+
+    if (rparen == std::string::npos || rparen + 2 >= line.size()) {
+      return false;
+    }
+
+    std::istringstream iss(line.substr(rparen + 2));
+    std::vector<std::string> fields;
+    std::string field;
+
+    while (iss >> field) {
+      fields.push_back(field);
+    }
+
+    // /proc/<pid>/stat:
+    // field 14 = utime, field 15 = stime.
+    // After removing "pid (comm)", parsing starts at field 3.
+    // Therefore: utime -> index 11, stime -> index 12.
+    if (fields.size() <= 12) {
+      return false;
+    }
+
+    try {
+      const long long utime = std::stoll(fields[11]);
+      const long long stime = std::stoll(fields[12]);
+      total_ticks = utime + stime;
+    } catch (...) {
+      return false;
+    }
+
+    return true;
+  }
+
+  bool processMatchesPipelineNames(
+    const std::string & pid_str,
+    const std::string & proc_name) const
+  {
+    for (const auto & name : pipeline_process_names_) {
+      if (proc_name == name) {
+        return true;
+      }
+
+      if (!proc_name.empty() &&
+          proc_name.size() >= 8 &&
+          name.rfind(proc_name, 0) == 0)
+      {
+        return true;
+      }
+    }
+
+    const std::vector<std::string> args = readProcessArguments(pid_str);
+
+    for (const auto & arg : args) {
+      for (const auto & name : pipeline_process_names_) {
+        if (arg.find(name) != std::string::npos) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  std::vector<int> findPipelinePids() const
+  {
+    std::vector<int> pids;
+    DIR * proc_dir = opendir("/proc");
+
+    if (!proc_dir) {
+      return pids;
+    }
+
+    struct dirent * entry = nullptr;
+
+    while ((entry = readdir(proc_dir)) != nullptr) {
+      if (entry->d_type != DT_DIR) {
+        continue;
+      }
+
+      const char * dname = entry->d_name;
+
+      if (!std::isdigit(static_cast<unsigned char>(dname[0]))) {
+        continue;
+      }
+
+      const std::string pid_str(dname);
+      const std::string proc_name = readProcessName(pid_str);
+
+      if (processMatchesPipelineNames(pid_str, proc_name)) {
+        try {
+          pids.push_back(std::stoi(pid_str));
+        } catch (...) {
+        }
+      }
+    }
+
+    closedir(proc_dir);
+    return pids;
+  }
+
+  double updatePipelineCpuPercent()
+  {
+    const auto now_wall = std::chrono::steady_clock::now();
+    const auto pids = findPipelinePids();
+
+    if (pids.empty()) {
+      have_pipeline_cpu_sample_ = false;
+      last_pipeline_proc_samples_.clear();
+      last_pipeline_cpu_wall_time_ = now_wall;
+      return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    const long ticks_per_sec = sysconf(_SC_CLK_TCK);
+    const long cpu_count = sysconf(_SC_NPROCESSORS_ONLN);
+
+    if (ticks_per_sec <= 0 || cpu_count <= 0) {
+      return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    std::map<int, ProcCpuSample> current_samples;
+
+    for (int pid : pids) {
+      long long total_ticks = 0;
+      if (readProcPidStat(pid, total_ticks)) {
+        current_samples[pid] = ProcCpuSample{total_ticks};
+      }
+    }
+
+    if (current_samples.empty()) {
+      have_pipeline_cpu_sample_ = false;
+      last_pipeline_proc_samples_.clear();
+      last_pipeline_cpu_wall_time_ = now_wall;
+      return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    if (!have_pipeline_cpu_sample_) {
+      last_pipeline_proc_samples_ = current_samples;
+      last_pipeline_cpu_wall_time_ = now_wall;
+      have_pipeline_cpu_sample_ = true;
+      return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    const double elapsed_sec =
+      std::chrono::duration<double>(now_wall - last_pipeline_cpu_wall_time_).count();
+
+    if (!std::isfinite(elapsed_sec) || elapsed_sec <= 0.0) {
+      last_pipeline_proc_samples_ = current_samples;
+      last_pipeline_cpu_wall_time_ = now_wall;
+      return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    long long delta_ticks_sum = 0;
+
+    for (const auto & kv : current_samples) {
+      const int pid = kv.first;
+      const long long current_ticks = kv.second.total_ticks;
+
+      auto it = last_pipeline_proc_samples_.find(pid);
+
+      if (it != last_pipeline_proc_samples_.end()) {
+        const long long previous_ticks = it->second.total_ticks;
+
+        if (current_ticks >= previous_ticks) {
+          delta_ticks_sum += current_ticks - previous_ticks;
+        }
+      }
+    }
+
+    last_pipeline_proc_samples_ = current_samples;
+    last_pipeline_cpu_wall_time_ = now_wall;
+
+    const double cpu_seconds =
+      static_cast<double>(delta_ticks_sum) / static_cast<double>(ticks_per_sec);
+
+    const double pipeline_cpu_percent =
+      100.0 * cpu_seconds / (elapsed_sec * static_cast<double>(cpu_count));
+
+    last_pipeline_cpu_percent_ = pipeline_cpu_percent;
+    return pipeline_cpu_percent;
+  }
+
   double getOwnRssMb() const
   {
     std::ifstream file("/proc/self/statm");
@@ -1177,6 +1446,7 @@ private:
     double raw_cmd_hz,
     double final_cmd_hz,
     double system_cpu_percent,
+    double pipeline_cpu_percent,
     double own_rss_mb)
   {
     if (!csv_.is_open()) {
@@ -1208,6 +1478,7 @@ private:
       << fmt(reaction_time_ms_.min()) << ","
       << fmt(reaction_time_ms_.max()) << ","
       << fmt(system_cpu_percent) << ","
+      << fmt(pipeline_cpu_percent) << ","
       << fmt(own_rss_mb)
       << "\n";
 
@@ -1219,6 +1490,7 @@ private:
     double tracked_hz,
     double safety_hz,
     double system_cpu_percent,
+    double pipeline_cpu_percent,
     double own_rss_mb)
   {
     std::ostringstream ss;
@@ -1229,6 +1501,7 @@ private:
       << "rosbag_name: " << rosbag_base_name_ << "\n"
       << "time_sec: " << fmt(elapsedMonitorTimeSec()) << "\n"
       << "pointcloud_hz: " << fmt(pc_hz) << "\n"
+      << "pointcloud_age_mean_ms_relative: " << fmt(pointcloud_age_ms_.mean()) << "\n"
       << "tracked_hz: " << fmt(tracked_hz) << "\n"
       << "tracked_last_seen_age_ms: " << fmt(trackedLastSeenAgeMs()) << "\n"
       << "track_count: " << current_track_count_ << "\n"
@@ -1242,6 +1515,7 @@ private:
       << "signal_transitions: " << signal_transitions_ << "\n"
       << "reaction_mean_ms: " << fmt(reaction_time_ms_.mean()) << "\n"
       << "system_cpu_percent: " << fmt(system_cpu_percent) << "\n"
+      << "pipeline_cpu_percent: " << fmt(pipeline_cpu_percent) << "\n"
       << "monitor_rss_mb: " << fmt(own_rss_mb) << "\n";
 
     std_msgs::msg::String out;
@@ -1299,6 +1573,7 @@ private:
     }
 
     const double system_cpu_percent = updateSystemCpuPercent();
+    const double pipeline_cpu_percent = updatePipelineCpuPercent();
     const double own_rss_mb = getOwnRssMb();
 
     const double pc_hz = safeHzFromPeriodMs(pointcloud_period_ms_.mean());
@@ -1312,6 +1587,7 @@ private:
       tracked_hz,
       safety_hz,
       system_cpu_percent,
+      pipeline_cpu_percent,
       own_rss_mb);
 
     writeCsvRow(
@@ -1321,15 +1597,17 @@ private:
       raw_cmd_hz,
       final_cmd_hz,
       system_cpu_percent,
+      pipeline_cpu_percent,
       own_rss_mb);
 
     if (debug_) {
       RCLCPP_INFO(
         this->get_logger(),
-        "bag=%s time=%s pc_hz=%s tracked_hz=%s tracked_last_seen_age_ms=%s safety_hz=%s signal=%d tracks=%d detector_ms=%s tracker_ms=%s cpu=%s rss=%s",
+        "bag=%s time=%s pc_hz=%s pc_age_rel_ms=%s tracked_hz=%s tracked_last_seen_age_ms=%s safety_hz=%s signal=%d tracks=%d detector_ms=%s tracker_ms=%s system_cpu=%s pipeline_cpu=%s rss=%s",
         rosbag_base_name_.c_str(),
         fmt(elapsedMonitorTimeSec()).c_str(),
         fmt(pc_hz).c_str(),
+        fmt(pointcloud_age_ms_.mean()).c_str(),
         fmt(tracked_hz).c_str(),
         fmt(trackedLastSeenAgeMs()).c_str(),
         fmt(safety_hz).c_str(),
@@ -1338,6 +1616,7 @@ private:
         fmt(detector_processing_ms_.mean()).c_str(),
         fmt(tracker_processing_ms_.mean()).c_str(),
         fmt(system_cpu_percent).c_str(),
+        fmt(pipeline_cpu_percent).c_str(),
         fmt(own_rss_mb).c_str());
     }
   }
@@ -1350,6 +1629,7 @@ private:
   std::string final_cmd_topic_;
   std::string summary_topic_;
   std::string output_dir_;
+  std::vector<std::string> pipeline_process_names_;
 
   double summary_period_sec_ = 1.0;
   double stop_speed_threshold_mps_ = 0.03;
@@ -1388,6 +1668,10 @@ private:
   double last_safety_time_sec_ = -1.0;
   double last_raw_cmd_time_sec_ = -1.0;
   double last_final_cmd_time_sec_ = -1.0;
+
+  bool have_pointcloud_time_reference_ = false;
+  double first_pointcloud_ros_time_sec_ = 0.0;
+  double first_pointcloud_msg_stamp_sec_ = 0.0;
 
   RunningStats pointcloud_period_ms_;
   RunningStats pointcloud_age_ms_;
@@ -1431,6 +1715,11 @@ private:
   bool have_cpu_sample_ = false;
   std::uint64_t last_cpu_idle_ = 0;
   std::uint64_t last_cpu_total_ = 0;
+
+  std::map<int, ProcCpuSample> last_pipeline_proc_samples_;
+  bool have_pipeline_cpu_sample_ = false;
+  std::chrono::steady_clock::time_point last_pipeline_cpu_wall_time_;
+  double last_pipeline_cpu_percent_ = std::numeric_limits<double>::quiet_NaN();
 };
 
 int main(int argc, char ** argv)
